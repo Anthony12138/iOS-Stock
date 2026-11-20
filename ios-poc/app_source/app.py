@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
