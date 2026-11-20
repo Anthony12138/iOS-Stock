@@ -27,12 +27,14 @@
 |---|---|
 | `app_source/app.py` | 业务本体（复制自桌面版，逐字节一致） |
 | `app_source/web/index.html` | 前端页面（复制自桌面版，逐字节一致） |
+| `assets/AppIcon-1024.png` | App 图标（安卓 ic_launcher 放大到 1024×1024、深色底不透明） |
 | `overrides/ios_boot.py` | 启动垫片（对应安卓 `android_boot.py`） |
-| `overrides/SceneDelegate.m` | 原生壳：初始化 Python + 起服务 + WKWebView + 失败提示/重试 |
-| `patch_project.py` | CI 里给官方 testbed 打补丁（覆盖壳、放置运行文件、注入 ATS） |
+| `overrides/SceneDelegate.m` | 原生壳：初始化 Python + 起服务 + WKWebView 铺满全屏 + 失败提示/重试 |
+| `patch_project.py` | CI 里给官方 testbed 打补丁（覆盖壳、放置运行文件、注入 ATS、改 App 名为「股票筛选系统」、装图标） |
+| `ios-upload.zip` | 本目录完整打包，直接解压覆盖上传到 GitHub 仓库即可 |
 | `.github/workflows/build.yml` | 云编译：下载 Python 包→打补丁→archive→打包 ipa→上传 |
 
-**现有 exe/apk 项目一行没动。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.6.5）。
+**现有 exe/apk 项目一行没动。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.6.5）。App 显示名「股票筛选系统」、图标与安卓端一致。
 
 ---
 
@@ -87,6 +89,26 @@ ios-poc/
 - ✅ `ios_boot.py` 本地行为验证：资源复制正确、二次同步不重写、`start()` 能起真实服务、`/api/health` 返回 `1.6.5`、首页返回完整前端。
 - ✅ `patch_project.py` 端到端模拟：文件到位、ATS 注入、ObjC 引用一致。
 - ✅ Python/YAML 语法检查全过。
+
+### 安卓 → iOS 移植安全性审查（逐项）
+
+指标算法本身**不会**因为换平台而改变：iOS 与安卓跑的是**同一份 `app.py`**（逐字节一致），MA、量比、涨幅、换手、分时均价线、跑赢上证比例等全是纯 Python 数学，arm64 两端浮点都是 IEEE 754 double，结果一致。
+
+真正需要关注的是「平台能力差异」，逐项核对结果：
+
+| 检查项 | 结论 |
+|---|---|
+| `sys.platform` / 平台特化分支 | 全项目 **0 处**，不存在走错分支的问题 |
+| 时区 / 交易日判断 | 显式 `Asia/Shanghai`，取不到时回退固定 UTC+8（A 股无夏令时，完全等价） |
+| 数据目录 / 工作目录 | `BASE_DIR` 取 `app.py` 所在目录 = 沙盒 `Documents/runtime`，可写；`WEB_DIR` 同目录 |
+| `subprocess` / `fork` / `multiprocessing` | **0 处**，iOS 禁进程派生不影响 |
+| `webbrowser` / 打开浏览器 | 仅 `main()` 内调用，iOS 走 `import app` 不执行 `main`，且 `NO_BROWSER=1` |
+| `print` / stderr 日志 | `Handler.log_message` 已重写为空操作；`print` 只在 `main()` |
+| 并发 / 内存 | `NIGHT_LIGHT=1` 生效，CPU 密集线程压到 4、网络等待压到 8，与安卓同档 |
+| HTTPS / CA 证书 | 有 certifi 用它，没有则退化为不校验（只访问公开行情、不传凭据）；`http.client` 与 `urllib` 都走该 context |
+| 未捕获异常 | 新增 `crash.log`（主线程 + 子线程），新增 `startup.log`（Python/OpenSSL/证书/时区） |
+
+结论：**指标、技术分析、评分标准不存在平台相关的计算差异**。iOS 上唯一的不确定性是「行情接口能否连通」，属于网络/证书层，已做兜底；真机若出现缺数据，前端会以 `degraded_fields` 明确标注，不会静默算错。
 
 ## 五、已知限制
 

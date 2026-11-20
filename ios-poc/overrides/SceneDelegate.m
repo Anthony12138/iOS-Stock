@@ -43,6 +43,7 @@
         self.statusLabel.textColor = [UIColor systemRedColor];
         self.statusLabel.numberOfLines = 0;
         self.statusLabel.text = [NSString stringWithFormat:@"启动失败：%@\n%@", msg, detail ?: @""];
+        self.statusLabel.hidden = NO;
         self.retryButton.hidden = NO;
         self.webView.hidden = YES;
     });
@@ -50,6 +51,7 @@
 
 - (void)showBooting {
     dispatch_async(dispatch_get_main_queue(), ^{
+        self.statusLabel.hidden = NO;
         self.statusLabel.textColor = [UIColor secondaryLabelColor];
         self.statusLabel.numberOfLines = 1;
         self.statusLabel.text = @"股票筛选系统 iOS v1.6.5 · 正在启动…";
@@ -172,7 +174,8 @@
     NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%d/", port];
     NSURL *url = [NSURL URLWithString:urlStr];
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self.statusLabel setText:[NSString stringWithFormat:@"股票筛选系统 iOS v1.6.5 · 就绪 · %@", urlStr]];
+        self.statusLabel.hidden = YES;   // 成功后隐藏状态栏，网页铺满全屏
+        self.retryButton.hidden = YES;
         self.webView.hidden = NO;
         [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
     });
@@ -217,8 +220,7 @@
         NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%d/", self.serverPort];
         NSURL *url = [NSURL URLWithString:urlStr];
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.statusLabel.textColor = [UIColor secondaryLabelColor];
-            self.statusLabel.text = [NSString stringWithFormat:@"分析引擎就绪 · %@", urlStr];
+            self.statusLabel.hidden = YES;
             self.retryButton.hidden = YES;
             self.webView.hidden = NO;
             [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
@@ -265,11 +267,14 @@
         [self.statusLabel.trailingAnchor constraintEqualToAnchor:vc.view.trailingAnchor constant:-16],
         [self.retryButton.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:8],
         [self.retryButton.centerXAnchor constraintEqualToAnchor:vc.view.centerXAnchor],
-        [self.webView.topAnchor constraintEqualToAnchor:self.retryButton.bottomAnchor constant:8],
+        [self.webView.topAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.topAnchor],
         [self.webView.leadingAnchor constraintEqualToAnchor:vc.view.leadingAnchor],
         [self.webView.trailingAnchor constraintEqualToAnchor:vc.view.trailingAnchor],
         [self.webView.bottomAnchor constraintEqualToAnchor:vc.view.bottomAnchor],
     ]];
+    // 网页铺满后，状态标签/重试按钮作为浮层叠在上层（仅启动中或失败时可见）
+    [vc.view bringSubviewToFront:self.statusLabel];
+    [vc.view bringSubviewToFront:self.retryButton];
 
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];

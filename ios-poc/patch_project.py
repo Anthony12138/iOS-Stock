@@ -4,10 +4,12 @@
   1) 用改造的 SceneDelegate.m 覆盖原文件（初始化 Python + WKWebView 加载本地服务）
   2) 把 ios_boot.py / app.py / web/ 放进 bundle 的 app/ 目录（Python 可 import）
   3) 给 Info.plist 注入 NSAppTransportSecurity 例外，允许 http://127.0.0.1
+  4) 改 App 显示名为「股票筛选系统」（CFBundleDisplayName / CFBundleName）
+  5) 安装 App 图标：assets/AppIcon-1024.png → AppIcon.appiconset + 登记 Contents.json
 
 用法：python3 patch_project.py <解压出的 testbed 目录> <overrides 目录>
   - app.py 与 web/ 的来源固定取「本脚本所在目录/app_source」，
-    这样无论 CI 从哪个 cwd 调用都能找到，避免路径漂移。
+    图标固定取「本脚本所在目录/assets」，不依赖 cwd，避免路径漂移。
 """
 import os
 import shutil
@@ -18,10 +20,12 @@ TESTBED = sys.argv[1]
 OVERRIDES = sys.argv[2]
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_SOURCE = os.path.join(HERE, "app_source")
+ASSETS = os.path.join(HERE, "assets")
 
 APP_DIR = os.path.join(TESTBED, "iOSTestbed")
 BUNDLE_APP = os.path.join(APP_DIR, "app")          # bundle 里的只读 app 目录
 plist_path = os.path.join(APP_DIR, "iOSTestbed-Info.plist")
+APP_NAME = "股票筛选系统"
 
 # 1) 覆盖 SceneDelegate.m（ObjC 启动壳）
 shutil.copyfile(os.path.join(OVERRIDES, "SceneDelegate.m"),
@@ -45,15 +49,35 @@ if os.path.isdir(dst_web):
 shutil.copytree(src_web, dst_web)
 print("placed web ->", dst_web, os.listdir(dst_web))
 
-# 3) Info.plist 注入 ATS 例外：允许本地 HTTP 加载（iOS App 自用）
+# 3) Info.plist：改 App 显示名 + 注入 ATS 例外（允许本地 HTTP，iOS App 自用）
 with open(plist_path, "rb") as f:
     plist = plistlib.load(f)
+plist["CFBundleDisplayName"] = APP_NAME   # 桌面图标下方显示的名字
+plist["CFBundleName"] = APP_NAME           # 系统设置/任务切换里显示的名字
 plist["NSAppTransportSecurity"] = {
     "NSAllowsArbitraryLoads": True,
     "NSAllowsLocalNetworking": True,
 }
 with open(plist_path, "wb") as f:
     plistlib.dump(plist, f)
-print("patched ATS:", plist_path)
+print("patched plist: name =", APP_NAME, "| ATS:", plist_path)
+
+# 4) 安装 App 图标：testbed 图标槽位原本无 filename（故显示空白）
+icon_set = os.path.join(APP_DIR, "Assets.xcassets", "AppIcon.appiconset")
+icon_src = os.path.join(ASSETS, "AppIcon-1024.png")
+if os.path.isdir(icon_set) and os.path.isfile(icon_src):
+    import json
+    shutil.copyfile(icon_src, os.path.join(icon_set, "AppIcon-1024.png"))
+    contents_path = os.path.join(icon_set, "Contents.json")
+    with open(contents_path, "r", encoding="utf-8") as f:
+        contents = json.load(f)
+    for img in contents.get("images", []):
+        if img.get("idiom") == "universal" and img.get("size") == "1024x1024":
+            img["filename"] = "AppIcon-1024.png"
+    with open(contents_path, "w", encoding="utf-8") as f:
+        json.dump(contents, f, ensure_ascii=False, indent=2)
+    print("installed icon ->", icon_set, os.path.getsize(icon_src), "bytes")
+else:
+    print("WARN: icon slot or source not found, skipped. icon_set=", icon_set, "src=", icon_src)
 
 print("PATCH_OK")
