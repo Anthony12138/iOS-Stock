@@ -181,6 +181,39 @@ def start(bundle_app: str, runtime: str) -> int:
         return port
 
 
+def ensure(bundle_app: str, runtime: str) -> int:
+    """前台唤醒时调用：服务还活着就返回原端口，被系统回收了就重启。
+
+    iOS 在后台挂起应用时会掐掉监听 socket，回前台后请求全部失败，
+    WKWebView 只能显示空白/黑屏。这里做一次存活检查：
+      - _srv 还在、socket 没关、服务线程还活着 → 直接返回原端口；
+      - 否则关掉旧对象、重新起一个（端口可能变化，由原生壳更新 URL）。
+    """
+    global _srv, _port
+    with _lock:
+        if _srv is not None:
+            alive = False
+            try:
+                _srv.socket.getsockname()
+                alive = any(t.name == "http" and t.is_alive() for t in threading.enumerate())
+            except Exception:
+                alive = False
+            if alive:
+                return _port
+            try:
+                _srv.shutdown()
+            except Exception:
+                pass
+            try:
+                _srv.server_close()
+            except Exception:
+                pass
+            _srv = None
+            _port = 0
+    # 走到这里说明服务已失效，重新启动（start 内部持锁并复用全局状态）
+    return start(bundle_app, runtime)
+
+
 def stop() -> None:
     global _srv, _port
     if _srv is not None:

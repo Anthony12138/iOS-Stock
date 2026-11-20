@@ -10,6 +10,13 @@
 //    4) 主线程 WKWebView 加载 http://127.0.0.1:<port>/
 //    5) 失败时显示错误提示 + 重试，不再是白屏
 //
+//  唤醒恢复（v1.6.8 起）：
+//    iOS 锁屏/切后台一段时间后，系统可能回收 WKWebView 的 WebContent 进程，
+//    也可能掐掉本地 HTTP 服务的连接；回前台时页面就只剩一块黑屏。
+//    这里在回前台做自检：先探测页面 DOM 是否还在、本地服务是否还能响应，
+//    任一项失败就自动重启 Python 服务并重新加载页面；WebContent 被回收时
+//    由 webViewWebContentProcessDidTerminate: 直接重载。
+//
 //  Python 初始化严格照抄 BeeWare/CPython 官方 testbed；stdlib 由
 //  install_python 构建脚本处理，app / app_packages 由 site.addsitedir 加入 sys.path。
 //
@@ -18,14 +25,34 @@
 #import <WebKit/WebKit.h>
 #import <Python/Python.h>
 
-@interface SceneDelegate ()
+// 页面背景色（与 web/index.html 的 --bg 一致），避免唤醒瞬间闪出黑/白块
+static UIColor *PageBackgroundColor(void) {
+    return [UIColor colorWithRed:7.0 / 255.0 green:10.0 / 255.0 blue:17.0 / 255.0 alpha:1.0];
+}
+
+// 页面存活探针：readyState + 元素数量。WebContent 被回收时这个调用会报错或不回调。
+static NSString *const kPageProbeJS =
+    @"(function(){try{"
+    @"if(!document||!document.body)return 'NOBODY';"
+    @"var n=document.body.querySelectorAll('*').length;"
+    @"return (document.readyState||'?')+'/'+n;"
+    @"}catch(e){return 'ERR';}})()";
+
+@interface SceneDelegate () <WKNavigationDelegate>
+
 @property (nonatomic, strong) WKWebView *webView;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIButton *retryButton;
-@property (nonatomic, assign) BOOL pyReady;      // CPython 是否已初始化成功
-@property (nonatomic, assign) BOOL bootAttempted; // 是否已尝试过启动（防重入）
-@property (nonatomic, assign) BOOL gilReleased;   // 是否已释放 GIL（释放后主线程不能再调 Python C API）
-@property (nonatomic, assign) int serverPort;     // 已启动服务的端口
+@property (nonatomic, assign) BOOL pyReady;       // CPython 是否已初始化成功
+@property (nonatomic, assign) BOOL bootAttempted;  // 是否已尝试过启动（防重入）
+@property (nonatomic, assign) BOOL gilReleased;    // 是否已释放 GIL（释放后主线程不能再调 Python C API）
+@property (nonatomic, assign) int serverPort;      // 已启动服务的端口
+
+@property (nonatomic, copy) NSString *bundleAppPath;  // 唤醒恢复时重启服务要用
+@property (nonatomic, copy) NSString *runtimePath;
+@property (nonatomic, strong) NSURL *pageURL;         // 当前应显示的地址
+@property (nonatomic, assign) BOOL recovering;        // 正在恢复，防并发重入
+@property (nonatomic, assign) NSInteger navFailCount; // 连续加载失败次数
 @end
 
 @implementation SceneDelegate
@@ -49,12 +76,25 @@
     });
 }
 
+// 唤醒后恢复失败：不遮挡整个页面，只把状态条浮在上层
+- (void)showWakeError:(NSString *)msg {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.statusLabel.textColor = [UIColor systemRedColor];
+        self.statusLabel.numberOfLines = 0;
+        self.statusLabel.text = [NSString stringWithFormat:@"%@\n点「重试」重新连接本地服务", msg ?: @"唤醒后页面未能恢复"];
+        self.statusLabel.hidden = NO;
+        self.retryButton.hidden = NO;
+        [self.retryButton.superview bringSubviewToFront:self.statusLabel];
+        [self.retryButton.superview bringSubviewToFront:self.retryButton];
+    });
+}
+
 - (void)showBooting {
     dispatch_async(dispatch_get_main_queue(), ^{
         self.statusLabel.hidden = NO;
         self.statusLabel.textColor = [UIColor secondaryLabelColor];
         self.statusLabel.numberOfLines = 1;
-        self.statusLabel.text = @"股票筛选系统 iOS v1.6.5 · 正在启动…";
+        self.statusLabel.text = @"股票筛选系统 iOS v1.6.9 · 正在启动…";
         self.retryButton.hidden = YES;
     });
 }
@@ -170,15 +210,74 @@
     return port;
 }
 
-- (void)loadPort:(int)port {
+// 唤醒恢复专用：调 ios_boot.ensure()，服务活着返回原端口，死了自动重启。
+// 必须在后台线程调用——GIL 已释放，主线程不再直接碰 Python C API。
+- (int)ensureServerAliveWithBundleApp:(NSString *)bundleApp runtime:(NSString *)runtime {
+    if (!self.pyReady || !self.gilReleased) return -1;
+    int port = -1;
+    PyGILState_STATE st = PyGILState_Ensure();
+    PyObject *boot = PyImport_ImportModule("ios_boot");
+    if (boot) {
+        PyObject *fn = PyObject_GetAttrString(boot, "ensure");
+        if (fn && PyCallable_Check(fn)) {
+            PyObject *args = Py_BuildValue("(ss)", [bundleApp UTF8String], [runtime UTF8String]);
+            PyObject *res = PyObject_CallObject(fn, args);
+            if (res) {
+                port = (int)PyLong_AsLong(res);
+                if (PyErr_Occurred()) { PyErr_Print(); port = -1; }
+                Py_DECREF(res);
+            } else {
+                PyErr_Print();
+            }
+            Py_XDECREF(args);
+        }
+        Py_XDECREF(fn);
+        Py_XDECREF(boot);
+    } else {
+        PyErr_Print();
+    }
+    PyGILState_Release(st);
+    return port;
+}
+
+#pragma mark - 页面加载
+
+- (void)loadPageAtPort:(int)port forceReload:(BOOL)force {
+    if (port <= 0) return;
     NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%d/", port];
-    NSURL *url = [NSURL URLWithString:urlStr];
+    self.pageURL = [NSURL URLWithString:urlStr];
+    self.navFailCount = 0;
     dispatch_async(dispatch_get_main_queue(), ^{
         self.statusLabel.hidden = YES;   // 成功后隐藏状态栏，网页铺满全屏
         self.retryButton.hidden = YES;
         self.webView.hidden = NO;
-        [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
+        NSURLRequestCachePolicy policy = force ? NSURLRequestReloadIgnoringLocalCacheData
+                                               : NSURLRequestUseProtocolCachePolicy;
+        NSURLRequest *req = [NSURLRequest requestWithURL:self.pageURL
+                                             cachePolicy:policy
+                                         timeoutInterval:30];
+        [self.webView loadRequest:req];
     });
+}
+
+- (void)loadPort:(int)port {
+    [self loadPageAtPort:port forceReload:NO];
+}
+
+// 只重载页面，不重启服务
+- (void)reloadPageForce:(BOOL)force {
+    if (self.serverPort > 0) {
+        [self loadPageAtPort:self.serverPort forceReload:force];
+        return;
+    }
+    if (self.pageURL) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.statusLabel.hidden = YES;
+            self.retryButton.hidden = YES;
+            self.webView.hidden = NO;
+            [self.webView loadRequest:[NSURLRequest requestWithURL:self.pageURL]];
+        });
+    }
 }
 
 // 完整启动入口
@@ -193,6 +292,8 @@
     // 可写 runtime：Documents/runtime（iOS 沙盒内可写，卸载 App 才清）
     NSArray *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *runtime = [[docs firstObject] stringByAppendingPathComponent:@"runtime"];
+    self.bundleAppPath = bundleApp;
+    self.runtimePath = runtime;
 
     if (!self.pyReady) {
         if (![self initPythonWithResourcePath:resourcePath]) return;
@@ -203,7 +304,8 @@
     if (port <= 0) return;
 
     // 释放 GIL，否则 http.server 的 Python 线程拿不到 GIL 无法响应请求。
-    // 注意：释放后主线程不能再调用任何 Python C API，重试只重载页面即可。
+    // 注意：释放后主线程不能再调用任何 Python C API，唤醒恢复改在后台线程
+    // 用 PyGILState_Ensure 重新取 GIL。
     if (!self.gilReleased) {
         PyEval_SaveThread();
         self.gilReleased = YES;
@@ -216,19 +318,129 @@
 - (void)retryTapped {
     // 服务若已在跑（GIL 已释放），只重载页面，绝不再碰 Python C API。
     if (self.gilReleased && self.serverPort > 0) {
-        // 服务已在跑，直接重载 URL，不碰 Python C API
-        NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%d/", self.serverPort];
-        NSURL *url = [NSURL URLWithString:urlStr];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.statusLabel.hidden = YES;
-            self.retryButton.hidden = YES;
-            self.webView.hidden = NO;
-            [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
-        });
+        [self reloadPageForce:YES];
         return;
     }
     self.bootAttempted = NO;
     [self bootPython];
+}
+
+#pragma mark - 唤醒恢复
+
+// 自查本地服务是否还能响应（2.5 秒超时）。服务被系统回收时这里会失败。
+- (void)probeServerWithCompletion:(void (^)(BOOL ok))done {
+    if (self.serverPort <= 0) { done(NO); return; }
+    NSURL *u = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%d/api/health", self.serverPort]];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:u];
+    req.timeoutInterval = 2.5;
+    req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    __block BOOL finished = NO;
+    void (^finish)(BOOL) = ^(BOOL ok) {
+        if (finished) return;
+        finished = YES;
+        dispatch_async(dispatch_get_main_queue(), ^{ done(ok); });
+    };
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req
+                                     completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        NSInteger code = [resp isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)resp).statusCode : 0;
+        finish(err == nil && code == 200);
+    }] resume];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        finish(NO);   // 连不上就别等了，直接恢复
+    });
+}
+
+// 重启/保活服务并重新加载页面
+- (void)recoverNow:(NSString *)reason {
+    if (self.recovering) return;
+    if (!self.pyReady || self.bundleAppPath.length == 0) return;   // 启动都没成功，交给原错误界面
+    self.recovering = YES;
+    NSLog(@"[iOS] wake recovery triggered: %@", reason);
+
+    NSString *bundleApp = self.bundleAppPath;
+    NSString *runtime   = self.runtimePath;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        int port = [self ensureServerAliveWithBundleApp:bundleApp runtime:runtime];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.recovering = NO;
+            if (port > 0) {
+                self.serverPort = port;
+                NSLog(@"[iOS] recovered on port %d", port);
+                [self loadPageAtPort:port forceReload:YES];
+            } else {
+                [self showWakeError:@"本地服务未能重启"];
+            }
+        });
+    });
+}
+
+// 回前台自检：页面 DOM 还在、服务还能响应，就什么都不做；否则恢复。
+- (void)verifyAfterWake {
+    if (!self.pyReady || self.serverPort <= 0 || self.recovering) return;
+    if (self.webView.isLoading) return;      // 首次启动/正在加载，别干扰
+    if (self.webView.hidden) {          // 之前停在错误页，直接重新加载
+        [self recoverNow:@"页面未显示"];
+        return;
+    }
+    // 服务探测与 DOM 探测并行，任一失败即恢复
+    [self probeServerWithCompletion:^(BOOL ok) {
+        if (!ok) [self recoverNow:@"本地服务无响应"];
+    }];
+
+    __block BOOL answered = NO;
+    __weak typeof(self) weakSelf = self;
+    [self.webView evaluateJavaScript:kPageProbeJS completionHandler:^(id result, NSError *error) {
+        answered = YES;
+        SceneDelegate *sself = weakSelf;
+        if (!sself) return;
+        NSString *s = [result isKindOfClass:[NSString class]] ? (NSString *)result : @"";
+        NSArray *parts = [s componentsSeparatedByString:@"/"];
+        BOOL stateOK = parts.count == 2 && [parts[0] isEqualToString:@"complete"];
+        NSInteger nodes = parts.count == 2 ? [parts[1] integerValue] : 0;
+        if (error || !stateOK || nodes < 20) {
+            [sself recoverNow:[NSString stringWithFormat:@"页面失效(%@)", s.length ? s : @"nil"]];
+        }
+    }];
+    // WebContent 被回收时 evaluateJavaScript 可能永远不回调，超时也走恢复
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!answered) [weakSelf recoverNow:@"页面探针无响应"];
+    });
+}
+
+#pragma mark - WKNavigationDelegate
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    self.navFailCount = 0;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.statusLabel.hidden = YES;
+        self.retryButton.hidden = YES;
+    });
+}
+
+- (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    if (error.code == NSURLErrorCancelled) return;   // 主动打断不算失败
+    self.navFailCount += 1;
+    NSLog(@"[iOS] navigation failed (%ld): %@", (long)self.navFailCount, error.localizedDescription);
+    if (self.navFailCount <= 2) {
+        // 本地服务刚重启时可能还没监听，重试两次
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self reloadPageForce:YES];
+        });
+    } else {
+        [self showWakeError:@"本地页面加载失败"];
+    }
+}
+
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    if (error.code == NSURLErrorCancelled) return;
+    self.navFailCount += 1;
+    if (self.navFailCount > 2) [self showWakeError:@"本地页面加载失败"];
+}
+
+// WebContent 进程被系统回收（锁屏后最常见）：直接重载，必要时顺带重启服务
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
+    NSLog(@"[iOS] WebContent process terminated, reloading");
+    [self recoverNow:@"WebContent 被回收"];
 }
 
 #pragma mark - 生命周期
@@ -238,7 +450,7 @@
     self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
 
     UIViewController *vc = [[UIViewController alloc] init];
-    vc.view.backgroundColor = [UIColor systemBackgroundColor];
+    vc.view.backgroundColor = PageBackgroundColor();
 
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -259,6 +471,11 @@
     self.webView = [[WKWebView alloc] initWithFrame:CGRectZero configuration:cfg];
     self.webView.translatesAutoresizingMaskIntoConstraints = NO;
     self.webView.hidden = YES;
+    self.webView.navigationDelegate = self;
+    // 透明 + 页面同色底：唤醒瞬间不会闪白/黑块
+    self.webView.opaque = NO;
+    self.webView.backgroundColor = PageBackgroundColor();
+    self.webView.scrollView.backgroundColor = PageBackgroundColor();
     [vc.view addSubview:self.webView];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -279,8 +496,44 @@
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
 
+    // 回前台自检：锁屏/切后台久了，页面或本地服务可能已被系统回收
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc addObserver:self selector:@selector(appWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
+    [nc addObserver:self selector:@selector(appDidBecomeActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+
     // 延迟启动，确保 UI 已渲染
     [self performSelector:@selector(bootPython) withObject:nil afterDelay:0.2];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)appWillEnterForeground {
+    // 唤醒瞬间 WebKit 还在重建渲染层，稍等再探
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self.webView setNeedsDisplay];
+        [self.webView.scrollView setNeedsDisplay];
+    });
+}
+
+- (void)appDidBecomeActive {
+    // 首次启动时 bootPython 还没跑完，这时的自检没有意义，交给启动流程
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self verifyAfterWake];
+    });
+}
+
+- (void)sceneDidBecomeActive:(UIScene *)scene {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self verifyAfterWake];
+    });
+}
+
+- (void)sceneWillEnterForeground:(UIScene *)scene {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self.webView setNeedsDisplay];
+    });
 }
 
 @end

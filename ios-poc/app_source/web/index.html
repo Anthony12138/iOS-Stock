@@ -172,7 +172,8 @@
     padding:0 10px;font-size:12px;
   }
   .search::placeholder{color:var(--muted2)}
-  .vsearch-bar{display:flex;align-items:center;gap:8px;margin:10px 0 2px;font-size:12px;color:var(--muted)}
+  /* 搜索条：下方留 12px，和统计条分开（AI / 涨停 / 跌停三个板块共用，统一生效） */
+  .vsearch-bar{display:flex;align-items:center;gap:8px;margin:10px 0 12px;font-size:12px;color:var(--muted)}
   .vsearch-bar .lb{white-space:nowrap}
   .seg{display:flex;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:2px}
   .seg button{
@@ -378,13 +379,20 @@
   .ai-ctl .auto-row{margin-left:2px}
 
   /* ===== AI 荐股九宫格 ===== */
-  .ai-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:14px;flex-wrap:wrap}
+  /* v1.6.9 头部统一：标题在上，控件整行从标题左基线开始（一夜持股走 .toolbar，不受影响）。
+     桌面端控件区限宽 560px：主按钮＝控件区整行，既和手机端一致，又不会横跨整个屏幕。 */
+  .ai-head{display:flex;flex-direction:column;align-items:stretch;gap:12px;margin-bottom:14px}
   .ai-head h2{font-size:17px;font-weight:700;letter-spacing:.4px}
   .ai-head .desc{font-size:11.5px;color:var(--muted2);line-height:1.8;margin-top:4px}
-  .ai-ctl{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap}
+  .ai-ctl{display:flex;flex-direction:column;align-items:stretch;gap:8px;
+          margin-left:0;width:100%;max-width:560px}
   /* 筛选控件统一装进一行容器；手机端靠这个容器把按钮挤到下一行 */
-  .ai-ctl .ctl-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
-  .ai-ctl > .btn.primary{height:32px}
+  .ai-ctl .ctl-row{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;min-width:0}
+  /* 每组「标签 + 控件」当成一个整体，绝不拆到两行——
+     否则「显示」会留在行尾、下拉被挤到下一行左边 */
+  .ai-ctl .ctl-grp{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;white-space:nowrap}
+  .ai-ctl > .btn.primary{width:100%;height:34px;flex:0 0 auto}
+  .ai-ctl > .seg,.ai-ctl > .ai-swing-toggle{width:100%}
   .ai-ctl label{font-size:11px;color:var(--muted2)}
   .ai-stats{
     display:flex;gap:0;align-items:center;background:var(--panel);border:1px solid var(--line);
@@ -412,7 +420,7 @@
   }
   .ai-card.top3 .ai-rank{color:var(--gold);background:rgba(233,185,73,.13);border-color:rgba(233,185,73,.26)}
   .ai-top{display:flex;align-items:center;gap:8px;position:relative;margin-bottom:10px}
-  .ai-name{font-size:15.5px;font-weight:700;letter-spacing:.3px;color:#F0F4FB}
+  .ai-name{font-size:15.5px;font-weight:700;letter-spacing:.3px;color:#F0F4FB;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ai-code{font-size:11px;color:var(--muted2);letter-spacing:.9px}
   .ai-score{margin-left:auto;display:flex;align-items:center;gap:5px}
   .ai-score b{font-size:16px;color:var(--gold);font-family:"DIN Alternate",Consolas,monospace}
@@ -432,6 +440,68 @@
   .dims{display:flex;gap:3px;margin-left:auto}
   .dims i{width:15px;height:3px;border-radius:2px;display:block}
   .ai-empty{padding:60px 20px;text-align:center;color:var(--muted2);font-size:12.5px;line-height:2}
+  /* 切换算法时的即时反馈条：正常文档流，不覆盖任何卡片内容。
+     复核完成 3 秒后自动收起，下面的网格随之回到原位。 */
+  .ai-notice{
+    display:flex;align-items:flex-start;gap:8px;margin:-2px 0 12px;padding:8px 11px;
+    border-radius:9px;font-size:11.5px;line-height:1.65;
+  }
+  .ai-notice.work{background:rgba(233,185,73,.08);border:1px solid rgba(233,185,73,.22);color:#D9C089}
+  .ai-notice.done{background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.22);color:#9CD9B4}
+  .ai-notice b{color:#F0F4FB;font-weight:700}
+  .ai-notice .ic{flex:none;font-size:11px;line-height:1.6}
+  /* 卡片角标：排在「推荐/不推荐买入」胶囊之后，不挤占、不覆盖它 */
+  .ai-flag{
+    flex:none;font-size:9.5px;line-height:20px;height:20px;padding:0 6px;border-radius:99px;
+    color:#C9B078;border:1px solid rgba(233,185,73,.28);background:rgba(233,185,73,.07);white-space:nowrap;
+  }
+  .ai-flag.new{color:#9CD9B4;border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.08)}
+
+  /* ===== 龙头分析 ===== */
+  .lt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(348px,100%),1fr));gap:12px}
+  .lt-grid > *{min-width:0}          /* nowrap 的催化文案不许撑宽网格列 */
+  .lt-card{position:relative;overflow:hidden;background:linear-gradient(165deg,#111827,#0C1220 62%);
+    border:1px solid var(--line);border-radius:12px;padding:13px 14px 12px;
+    transition:transform .16s,border-color .16s,box-shadow .16s}
+  .lt-card:hover{transform:translateY(-2px);border-color:rgba(233,185,73,.45);box-shadow:0 12px 28px rgba(0,0,0,.38)}
+  .lt-card.top{border-color:rgba(233,185,73,.32);background:linear-gradient(160deg,rgba(233,185,73,.085),#0C1220 58%)}
+  .lt-top{display:flex;align-items:center;gap:7px}
+  .lt-rank{flex:0 0 auto;font-family:"DIN Alternate",Consolas,monospace;font-size:10.5px;font-weight:800;
+    color:#8B93A6;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+    border-radius:5px;padding:1px 5px;letter-spacing:.4px}
+  .lt-card.top .lt-rank{color:var(--gold);background:rgba(233,185,73,.13);border-color:rgba(233,185,73,.26)}
+  .lt-name{font-size:15px;font-weight:700;color:#F0F4FB;letter-spacing:.3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .lt-src{flex:none;font-size:9.5px;line-height:15px;height:15px;padding:0 4px;border-radius:4px;
+    color:#7C8798;border:1px solid rgba(255,255,255,.1)}
+  .lt-pct{margin-left:auto;font-size:16px;font-weight:800;letter-spacing:.2px}
+  .lt-meta{display:flex;flex-wrap:wrap;gap:3px 10px;margin-top:6px;font-size:10.5px;color:#7C8798}
+  .lt-meta b{color:#C9D2E2;font-weight:600}
+  .lt-hot{margin-top:8px;height:3px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden}
+  .lt-hot i{display:block;height:100%;border-radius:2px;background:linear-gradient(90deg,#8E6A1E,#E9B949)}
+  .lt-cat{margin-top:8px;font-size:10.5px;color:#8FA0BA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lt-cat b{color:#B9A16A;font-weight:600;margin-right:4px}
+  .lt-sec{margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,.055)}
+  .lt-lb{display:flex;align-items:center;gap:5px;font-size:10px;color:#6D7891;letter-spacing:.8px;margin-bottom:6px}
+  .lt-lb em{font-style:normal;color:#7C8798;letter-spacing:0}
+  .lt-lead{display:flex;align-items:baseline;gap:7px;cursor:pointer}
+  .lt-lname{font-size:14.5px;font-weight:700;color:#F0F4FB}
+  .lt-lcode{font-size:10px;color:#5F6B80;letter-spacing:.5px}
+  .lt-ltag{font-size:9.5px;line-height:17px;height:17px;padding:0 6px;border-radius:99px;
+    color:#E9B949;border:1px solid rgba(233,185,73,.35);background:rgba(233,185,73,.1)}
+  .lt-lpct{margin-left:auto;font-size:14px;font-weight:700}
+  .lt-lmeta{margin-top:5px;font-size:10.5px;color:#7C8798}
+  .lt-lmeta b{font-weight:600}
+  .lt-flow{display:flex;flex-wrap:wrap;gap:5px}
+  .lt-f{display:inline-flex;align-items:center;gap:5px;height:23px;padding:0 7px;border-radius:6px;cursor:pointer;
+    flex:0 0 auto;white-space:nowrap;   /* 不收缩：挤不下就整颗换行，不能把「+1.02%」裁掉半个 */
+    background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);font-size:10.5px;color:#B6C1D4}
+  .lt-f:hover{border-color:rgba(233,185,73,.4);color:#E4EAF5}
+  .lt-f b{font-weight:600;color:#DCE4F2}
+  .lt-f i{font-style:normal;font-size:10px}
+  .lt-f em{font-style:normal;font-size:9.5px;line-height:14px;padding:0 3px;border-radius:3px;
+    color:#E9B949;background:rgba(233,185,73,.12)}
+  .lt-f.hot{border-color:rgba(233,185,73,.28);background:rgba(233,185,73,.06)}
 
   /* 多日持股 */
   .sw-plan{
@@ -815,6 +885,8 @@
     tbody td:nth-child(2){white-space:normal;min-width:88px}
 
     .ai-grid{grid-template-columns:1fr!important;gap:10px}
+    .lt-grid{grid-template-columns:1fr!important;gap:10px}
+    .lt-card{padding:12px 12px 11px}
     .ai-card{padding:11px 12px}
     .ai-reasons li{font-size:11.5px}
 
@@ -823,7 +895,8 @@
     .ai-head .desc{display:none}
     .ai-head h2{font-size:17px}
     /* 四个板块头部排版统一：筛选行左对齐，主按钮单独一行占满整列 */
-    .ai-ctl{flex-direction:column;align-items:stretch;flex-wrap:nowrap;margin-left:0;gap:8px;width:100%}
+    .ai-ctl{flex-direction:column;align-items:stretch;flex-wrap:nowrap;margin-left:0;gap:8px;
+            width:100%;max-width:none}
     .ai-ctl .ctl-row{gap:6px;justify-content:flex-start;width:100%}
     .ai-ctl > .btn.primary{width:100%;height:34px;justify-content:center;flex:0 0 auto}
     .ai-ctl .btn,.ai-ctl .seg{height:30px}
@@ -1023,6 +1096,7 @@
     <button class="tab" data-view="ai">AI 荐股</button>
     <button class="tab" data-view="zt">涨停分析</button>
     <button class="tab" data-view="dt">跌停分析</button>
+    <button class="tab" data-view="ld">龙头分析</button>
     <button class="tab" data-view="review">股票搜索</button>
     <button class="tab" data-view="strategy">战法规则</button>
   </div>
@@ -1192,27 +1266,27 @@
       </div>
       <div class="ai-ctl">
         <div class="ctl-row">
-        <label>候选池</label>
+        <span class="ctl-grp"><label for="aiUniverse">候选池</label>
         <select class="sel" id="aiUniverse">
           <option value="120">120 只</option>
           <option value="200" selected>200 只</option>
           <option value="320">320 只</option>
-        </select>
-        <label>评分≥</label>
+        </select></span>
+        <span class="ctl-grp"><label for="aiMinScore">评分≥</label>
         <select class="sel" id="aiMinScore">
           <option value="50">50</option>
           <option value="55" selected>55</option>
           <option value="60">60</option>
           <option value="65">65</option>
-        </select>
-        <label>显示</label>
+        </select></span>
+        <span class="ctl-grp"><label for="aiTop">显示</label>
         <select class="sel" id="aiTop">
           <option value="24">24 只</option>
           <option value="42" selected>42 只</option>
           <option value="60">60 只</option>
-        </select>
+        </select></span>
         </div>
-        <div class="ai-swing-toggle" id="aiSwingToggleRow" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg2,#182231);border-radius:8px;padding:9px 11px;margin-bottom:10px;cursor:pointer">
+        <div class="ai-swing-toggle" id="aiSwingToggleRow" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;box-sizing:border-box;background:var(--bg2,#182231);border-radius:8px;padding:9px 11px;margin-bottom:0;cursor:pointer">
           <div>
             <div style="font-size:12px;color:var(--text,#E9EFF8)" id="aiSwingLabel">多日持股算法</div>
             <div style="font-size:11px;color:var(--muted,#7C8798);margin-top:2px" id="aiSwingDesc">开启后按趋势波段口径筛选（仅影响 AI 荐股）</div>
@@ -1233,6 +1307,8 @@
       <div class="ai-stat"><div class="k">数据源 / 耗时</div><div class="v num" id="aiMeta" style="font-size:13px">—</div></div>
       <div class="ai-stat"><div class="k">上次刷新</div><div class="v num" id="aiUpd" style="font-size:13px">—</div></div>
     </div>
+
+    <div class="ai-notice" id="aiNotice" style="display:none"></div>
 
     <div class="ai-grid" id="aiGrid"></div>
     <div class="ai-empty" id="aiEmpty">
@@ -1268,12 +1344,12 @@
       </div>
       <div class="ai-ctl">
         <div class="ctl-row">
-        <label>筛选</label>
+        <span class="ctl-grp"><label>筛选</label>
         <div class="seg" id="ztSeg">
           <button class="on" data-f="all">全部</button>
           <button data-f="intraday">盘中追</button>
           <button data-f="overnight">隔夜单</button>
-        </div>
+        </div></span>
         </div>
         <button class="btn primary" id="btnZT">刷新涨停池</button>
       </div>
@@ -1326,13 +1402,13 @@
       </div>
       <div class="ai-ctl">
         <div class="ctl-row">
-        <label>筛选</label>
+        <span class="ctl-grp"><label>筛选</label>
         <div class="seg" id="dtSeg">
           <button class="on" data-f="all">全部</button>
           <button data-f="intraday">当日盘中</button>
           <button data-f="ditian">地天板</button>
           <button data-f="close">尾盘次日</button>
-        </div>
+        </div></span>
         </div>
         <button class="btn primary" id="btnDT">刷新跌停池</button>
       </div>
@@ -1364,6 +1440,67 @@
       再决定要不要赌次日反核；次日大幅低开的等企稳，不接下落的刀。<br />
       跌停博弈属于左侧逆向交易，胜率天然低于右侧，且因 T+1 不能当日离场，单只仓位建议不超过总资金 5%，
       用极小仓位试错、次日择机处理。本板块不构成投资建议，盈亏自负。
+    </div>
+  </section>
+
+  <!-- ============ 龙头分析 ============ -->
+  <section id="view-ld" style="display:none">
+    <div class="ai-head">
+      <div>
+        <h2>龙头分析 · 热门板块 → 龙头 → 跟随 · 主板</h2>
+        <div class="desc">
+          先按 <b style="color:#CBD5E5">主力净额 + 涨幅 + 涨停家数 + 成交额</b> 从行业与概念板块里挑出当日资金最集中、
+          最活跃的方向，再在板块成分股里按 <b style="color:#CBD5E5">涨幅 / 资金占成交额比 / 成交额 / 换手 / 量比</b> 打分，
+          分出<b style="color:#CBD5E5">龙头股</b>与<b style="color:#CBD5E5">跟随股</b>。<br />
+          板块层先剔除成交额不到 40 亿、主力净流出，以及「昨日涨停 / 融资融券 / 基金重仓」这类统计型板块；
+          只保留主板、非 ST，主板成分股不足 5 只的板块不参与。<br />
+          龙头＝先看涨停、再看连板数、最后才比资金与涨幅，和盘面上「最高板就是龙头」一致；
+          跟随股＝同一条资金主线上还没走出来的红盘票。点龙头或跟随股可打开 K 线 / 分时 / 打分详情。
+          本板块不构成投资建议，盈亏自负。
+        </div>
+      </div>
+      <div class="ai-ctl">
+        <div class="ctl-row">
+          <span class="ctl-grp"><label for="ldBoards">板块数</label>
+            <select class="sel" id="ldBoards">
+              <option value="6">6 个</option>
+              <option value="8" selected>8 个</option>
+              <option value="12">12 个</option>
+            </select></span>
+          <span class="ctl-grp"><label for="ldFollow">跟随股</label>
+            <select class="sel" id="ldFollow">
+              <option value="4">4 只</option>
+              <option value="6" selected>6 只</option>
+              <option value="8">8 只</option>
+            </select></span>
+        </div>
+        <button class="btn primary" id="btnLD">刷新龙头榜</button>
+      </div>
+    </div>
+
+    <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-ld"></div></div>
+
+    <div class="ai-stats">
+      <div class="ai-stat"><div class="k">扫描板块</div><div class="v num" id="ldScan">—</div></div>
+      <div class="ai-stat"><div class="k">资金净流入</div><div class="v num" id="ldInflow">—</div></div>
+      <div class="ai-stat"><div class="k">入选热门</div><div class="v num" id="ldCount">—</div></div>
+      <div class="ai-stat"><div class="k">覆盖个股</div><div class="v num" id="ldCover">—</div></div>
+      <div class="ai-stat"><div class="k">数据 / 耗时</div><div class="v num" id="ldMeta" style="font-size:13px">—</div></div>
+      <div class="ai-stat"><div class="k">上次刷新</div><div class="v num" id="ldUpd" style="font-size:13px">—</div></div>
+    </div>
+
+    <div class="lt-grid" id="ldGrid"></div>
+    <div class="ai-empty" id="ldEmpty">
+      点击「刷新龙头榜」。系统先扫全部行业与概念板块的资金流，<br />
+      再拉取入选板块的主板成分股排序，大约 1–3 秒。
+    </div>
+
+    <div class="note" style="margin-top:16px">
+      <b>怎么用：</b>先看板块这一层——主力净额为正、当日有涨停、成交额放大的板块才是资金真正在做的方向；
+      再看板块里的龙头。龙头是板数最高、资金最强的那只，跟随股是同一条主线上还没走出来的票，
+      龙头不倒，跟随股才有意义；龙头一断板，跟随股通常一起退潮。<br />
+      数据全部来自交易所与东财公开行情（板块资金流、成分股涨幅 / 成交额 / 换手 / 量比），
+      涨停与连板取自同花顺涨停池，可逐只点开核对 K 线与分时。本板块不构成投资建议，盈亏自负。
     </div>
   </section>
 
@@ -1581,6 +1718,14 @@
               <span class="auto-next" id="dtAutoNext">未开启</span>
             </div>
           </div>
+          <div class="auto-item" data-k="ld">
+            <div class="nm"><b>龙头分析</b><small>板块资金流 → 龙头 / 跟随，间隔最短 30 秒</small></div>
+            <div class="ctl">
+              <label class="sw"><input type="checkbox" id="ldAuto" aria-label="龙头分析自动重扫" /><i></i></label>
+              <select class="sel auto-sel" id="ldAutoSec" title="龙头分析重扫间隔"></select>
+              <span class="auto-next" id="ldAutoNext">未开启</span>
+            </div>
+          </div>
           <button class="btn auto-offall" id="autoOffAll">全部关闭</button>
         </div>
       </section>
@@ -1772,6 +1917,7 @@ const state = {
   swing: null, swingLoading: false,
   ztd: null, ztdLoading: false, ztFilter: 'all',
   dtd: null, dtdLoading: false, dtFilter: 'all', liveTimer: null, reviewFile: null,
+  ldd: null, ldLoading: false,
   searchResult: null, searchLoading: false,
   paused: false, liveItem: null, liveMarket: null, detailSeq: 0,
   scanError: null
@@ -2544,20 +2690,26 @@ function drawTrend(cv, tr, item, idxTr) {
   const x = i => xm(mins[i]);
   const avgs = pts.map((p, i) => ({ m: mins[i], v: +p.avg || 0 })).filter(o => o.v > 0);
   const base = prevClose || pts[0].price;
-  // v1.6.5：先把上证映射价算出来并入 y 轴范围，避免个股窄幅横盘 + 指数大涨时
-  // 蓝色虚线被画出绘图区（映射价 base*(idxPrice/idxPrev) 可能远超个股 hi/lo）。
-  let _idxPacked = [];
-  const _iprev = idxTr ? (+idxTr.prev_close || +(idxTr.points && idxTr.points[0] && idxTr.points[0].price) || 0) : 0;
-  if (idxTr && idxTr.points && idxTr.points.length >= 20 && _iprev > 0) {
-    _idxPacked = idxTr.points.map(p => ({ p, m: trendMinute(p.time) }))
-      .filter(o => o.m !== null && Number.isFinite(+o.p.price) && +o.p.price > 0)
-      .sort((a, b) => a.m - b.m)
-      .filter((o, i, arr) => i === 0 || o.m !== arr[i - 1].m);
-    if (_idxPacked.length < 20) _idxPacked = [];
+  // v1.6.7：上证指数走自己的尺子（独立振幅），不再并入个股 y 轴范围。
+  // 旧画法把指数涨幅套在个股价格上（base*idx/idxPrev），个股一活跃蓝线就被压平；
+  // 现在以指数昨收锚定个股昨收线，按指数当日最大偏离铺开，形状与真实上证分时一致。
+  let _idxPacked = [], _iprev = 0, _imaxDev = 0;
+  if (idxTr && idxTr.points && idxTr.points.length >= 20) {
+    _iprev = +idxTr.prev_close || +idxTr.points[0].price || 0;
+    if (_iprev > 0) {
+      _idxPacked = idxTr.points.map(p => ({ p, m: trendMinute(p.time) }))
+        .filter(o => o.m !== null && Number.isFinite(+o.p.price) && +o.p.price > 0)
+        .sort((a, b) => a.m - b.m)
+        .filter((o, i, arr) => i === 0 || o.m !== arr[i - 1].m);
+      if (_idxPacked.length < 20) {
+        _idxPacked = [];
+      } else {
+        _imaxDev = Math.max(..._idxPacked.map(o => Math.abs(+o.p.price / _iprev - 1)));
+      }
+    }
   }
-  const idxMapped = _idxPacked.map(o => base * (+o.p.price / _iprev));
   const prices = pts.map(p => +p.price).concat(avgs.map(o => o.v))
-    .concat([prevClose || pts[0].price]).concat(idxMapped)
+    .concat([prevClose || pts[0].price])
     .filter(v => Number.isFinite(v) && v > 0);
   let hi = Math.max(...prices), lo = Math.min(...prices);
   const pad = Math.max((hi - lo) * 0.14, hi * 0.004); hi += pad; lo -= pad;
@@ -2604,20 +2756,33 @@ function drawTrend(cv, tr, item, idxTr) {
     avgs.forEach((o, i) => i ? ctx.lineTo(xm(o.m), y(o.v)) : ctx.moveTo(xm(o.m), y(o.v)));
     ctx.strokeStyle = '#E9B949'; ctx.lineWidth = 1.3; ctx.stroke();
   }
-  // v1.6.4 一夜持股专属：叠加上证指数分时（蓝色虚线）。按涨幅%对齐到个股
-  // 价格轴：idxPrice/idxPrev → base×(涨幅)，两条线同起点、直接比强弱。
-  // 仅 mode=scan 且后端透出 idx_trends 时绘制；其他板块从不传 idxTr。
+  // v1.6.7：上证指数分时（所有板块都画，蓝色实线 + 独立振幅）。
+  // 以指数昨收对齐个股昨收线，按当日最大偏离铺开（上下各 40% 图高），
+  // 指数几乎不动时用 0.15% 作下限，避免把噪声放大成假波动。
   if (_idxPacked.length >= 20) {
-    ctx.save(); ctx.setLineDash([5, 4]);
-    // 保险裁剪：即便映射价极端异常也不越出绘图区
-    ctx.beginPath(); ctx.rect(P.l, P.t, cw, ch); ctx.clip();
+    const _amp = ch * 0.40 / Math.max(_imaxDev, 0.0015);
+    const yIdx = r => y(base) - (r - 1) * _amp;      // r = idxPrice / idxPrev
+    ctx.save(); ctx.beginPath(); ctx.rect(P.l, P.t, cw, ch); ctx.clip();
     ctx.beginPath();
     _idxPacked.forEach((o, i) => {
-      const vy = base * (+o.p.price / _iprev);
-      i ? ctx.lineTo(xm(o.m), y(vy)) : ctx.moveTo(xm(o.m), y(vy));
+      const yy = yIdx(+o.p.price / _iprev);
+      i ? ctx.lineTo(xm(o.m), yy) : ctx.moveTo(xm(o.m), yy);
     });
-    ctx.strokeStyle = '#4B8BF5'; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.strokeStyle = '#4B8BF5'; ctx.lineWidth = 1.6;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(75,139,245,.45)'; ctx.shadowBlur = 5;
+    ctx.stroke();
     ctx.restore();
+    // 右端标注真实涨跌幅：独立坐标下位置不能逐点比，但方向与幅度仍可读
+    const _lastR = +_idxPacked[_idxPacked.length - 1].p.price / _iprev;
+    const _ly = Math.max(P.t + 9, Math.min(P.t + ch - 9, yIdx(_lastR)));
+    const _lt = '上证 ' + (_lastR >= 1 ? '+' : '') + ((_lastR - 1) * 100).toFixed(2) + '%';
+    ctx.font = sansF(9.5); ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    const _lw = ctx.measureText(_lt).width;
+    ctx.fillStyle = 'rgba(75,139,245,.18)';
+    ctx.fillRect(P.l + cw - _lw - 8, _ly - 15, _lw + 8, 13);
+    ctx.fillStyle = '#8DBAFF';
+    ctx.fillText(_lt, P.l + cw - 4, _ly - 3);
   }
   ctx.beginPath(); ctx.arc(xEnd, y(lastP), 2.6, 0, Math.PI * 2);
   ctx.fillStyle = col; ctx.fill();
@@ -3708,7 +3873,7 @@ function renderDetailPane(item, d) {
     }
   }
   body.innerHTML = `<canvas id="cv"></canvas>
-    <div class="legend">${state.dtab === 'intra' ? '<span><i style="background:#F04B4E"></i>价格</span>' : ''}<span><i style="background:#E9B949"></i>${state.dtab === 'intra' ? '分时均价线（VWAP）' : 'MA5 / MA10 / MA20'}</span>${(state.dtab === 'intra' && item.mode === 'scan' && d && d.idx_trends && d.idx_trends.points && d.idx_trends.points.length >= 20) ? `<span><i style="background:#4B8BF5"></i>上证指数（对齐涨幅）</span>` : ''}${
+    <div class="legend">${state.dtab === 'intra' ? '<span><i style="background:#F04B4E"></i>价格</span>' : ''}<span><i style="background:#E9B949"></i>${state.dtab === 'intra' ? '分时均价线（VWAP）' : 'MA5 / MA10 / MA20'}</span>${(state.dtab === 'intra' && d && d.idx_trends && d.idx_trends.points && d.idx_trends.points.length >= 20) ? `<span><i style="background:#4B8BF5"></i>上证指数（独立振幅）</span>` : ''}${
       state.dtab === 'daily'
         ? `<span><i style="background:#F04B4E"></i>获利筹码</span><span><i style="background:#4B8BF5"></i>套牢筹码</span><span><i style="background:#F07578"></i>压力位</span><span><i style="background:#4ADE80"></i>支撑位</span><span><i style="background:#FFB020"></i>止盈位</span><span><i style="background:#38BDF8"></i>止损位</span><span style="color:#5F6B80">按最新价 ${numOrDash(px, 2)} 实时计算${plan && plan.backend ? ' · 后端口径' : ' · 按现价估算'}</span>`
         : (state.dtab === 'intra' ? `<span style="color:${d.trends?.live ? '#7FC8A4' : '#E9B949'}">${esc(d.trends?.fresh_note || '分时数据')}</span>` : '')}${chartStatusNote() ? `<span style="color:#5F6B80">${chartStatusNote()}</span>` : ''}</div>
@@ -3717,7 +3882,7 @@ function renderDetailPane(item, d) {
     <div class="verdict ${verdictCls(item)}" style="margin-top:14px">${verdictText(item)}</div>`;
   const cv = $('#cv');
   try {
-    if (state.dtab === 'intra') drawTrend(cv, d.trends || {}, item, item.mode === 'scan' ? d.idx_trends : null);
+    if (state.dtab === 'intra') drawTrend(cv, d.trends || {}, item, d.idx_trends || null);
     else drawKline(cv, bars, item, prof, rng, plan);
   } catch (e) {
     // 数据异常（缺字段/空数组）时，直接把原因画出来，避免画布一片空白让人以为卡住
@@ -4132,7 +4297,7 @@ function syncPfUi() {
   }
 }
 /* 搜索框只有一个 DOM 节点，切板块时搬到当前板块的宿主里，五板块共用同一份 state.search */
-const VSEARCH_HOST = { ai: '#vsh-ai', swing: '#vsh-swing', zt: '#vsh-zt', dt: '#vsh-dt' };
+const VSEARCH_HOST = { ai: '#vsh-ai', swing: '#vsh-swing', zt: '#vsh-zt', dt: '#vsh-dt', ld: '#vsh-ld' };
 function placeSearch(view) {
   const el = $('#search');
   if (!el) return;
@@ -4154,6 +4319,7 @@ function renderCurrent() {
   else if (v === 'ai') renderAI();
   else if (v === 'zt') renderZT();
   else if (v === 'dt') renderDT();
+  else if (v === 'ld') renderLD();
   else if (v === 'review') renderSearch();
 }
 
@@ -4449,30 +4615,34 @@ function pfClear() {
 const AUTO_KEY = 'yb_auto4';
 const AUTO_OLD_KEYS = ['yb_auto3', 'yb_auto2', 'yb_auto'];
 const AUTO_STEPS = [10, 15, 30, 60, 120];        // 五处共用同一套档位
-const AUTO_MIN = { scan: 10, swing: 30, ai: 30, zt: 30, dt: 30 };   // 深度分析一次要跑 10~40 秒，更短的档位没意义
+const AUTO_MIN = { scan: 10, swing: 30, ai: 30, zt: 30, dt: 30, ld: 30 };   // 深度分析一次要跑 10~40 秒，更短的档位没意义
 const AUTO_DEF = {
   scan: 30,
-  ai: PHONE_UI ? 120 : 60, zt: PHONE_UI ? 120 : 60, dt: PHONE_UI ? 120 : 60
+  ai: PHONE_UI ? 120 : 60, zt: PHONE_UI ? 120 : 60, dt: PHONE_UI ? 120 : 60,
+  ld: PHONE_UI ? 120 : 60
 };
 const AUTO = {
   scan: { on: false, sec: AUTO_DEF.scan, name: '一夜持股' },
   ai:   { on: false, sec: AUTO_DEF.ai,   name: 'AI 荐股' },
   zt:   { on: false, sec: AUTO_DEF.zt,   name: '涨停分析' },
-  dt:   { on: false, sec: AUTO_DEF.dt,   name: '跌停分析' }
+  dt:   { on: false, sec: AUTO_DEF.dt,   name: '跌停分析' },
+  ld:   { on: false, sec: AUTO_DEF.ld,   name: '龙头分析' }
 };
 const AUTO_UI = {
   scan: { cb: 'autoRefresh', se: 'autoSec',   nx: 'autoNext',   upd: 'lastUpd' },
   ai:   { cb: 'aiAuto',      se: 'aiAutoSec', nx: 'aiAutoNext', upd: 'aiUpd' },
   zt:   { cb: 'ztAuto',      se: 'ztAutoSec', nx: 'ztAutoNext', upd: 'ztUpd' },
-  dt:   { cb: 'dtAuto',      se: 'dtAutoSec', nx: 'dtAutoNext', upd: 'dtUpd' }
+  dt:   { cb: 'dtAuto',      se: 'dtAutoSec', nx: 'dtAutoNext', upd: 'dtUpd' },
+  ld:   { cb: 'ldAuto',      se: 'ldAutoSec', nx: 'ldAutoNext', upd: 'ldUpd' }
 };
-const AUTO_POOL = ['scan', 'ai', 'zt', 'dt'];
-const autoLast = { scan: 0, ai: 0, zt: 0, dt: 0 };
+const AUTO_POOL = ['scan', 'ai', 'zt', 'dt', 'ld'];
+const autoLast = { scan: 0, ai: 0, zt: 0, dt: 0, ld: 0 };
 const AUTO_RUN = {
   scan: () => scan(true),
   ai: () => runAI(true),
   zt: () => runZT(true),
-  dt: () => runDT(true)
+  dt: () => runDT(true),
+  ld: () => runLD(true)
 };
 let autoRunning = 0;          // 正在进行中的自动刷新数（只算自动触发的）
 const AUTO_MAX_RUN = 2;       // 最多两路并发：五路一起打行情接口容易被限流、手机也扛不住
@@ -4480,7 +4650,8 @@ const AUTO_MAX_RUN = 2;       // 最多两路并发：五路一起打行情接�
 function autoBusy(k) {
   return k === 'scan' ? !!state.scanning
     : k === 'ai' ? !!state.aiLoading
-        : k === 'zt' ? !!state.ztdLoading : !!state.dtdLoading;
+        : k === 'zt' ? !!state.ztdLoading
+            : k === 'dt' ? !!state.dtdLoading : !!state.ldLoading;
 }
 
 /* 把秒数吸附到合法档位（老配置里的 300 / 45 之类也能落到最近的一档） */
@@ -4614,8 +4785,8 @@ function paintTwo(el) {
 /* 各板块 tick 把 #aiMeta/#swMeta/#ztMeta/#dtMeta 写成「扫描中 Ns」后，
    成功/失败结束都要恢复成正常的 source/date · elapsed 文案，不能永久残留。
    手机端拆成两行：数据源（或数据日期）/ 耗时，去掉中间的「·」。 */
-const META_EL = { ai: '#aiMeta', swing: '#swMeta', zt: '#ztMeta', dt: '#dtMeta' };
-const META_DATA = { ai: () => state.ai, zt: () => state.ztd, dt: () => state.dtd };
+const META_EL = { ai: '#aiMeta', swing: '#swMeta', zt: '#ztMeta', dt: '#dtMeta', ld: '#ldMeta' };
+const META_DATA = { ai: () => state.ai, zt: () => state.ztd, dt: () => state.dtd, ld: () => state.ldd };
 function setMeta(k, left, right) {
   const el = $(META_EL[k]); if (!el) return;
   el.dataset.ml1 = left;
@@ -4624,10 +4795,11 @@ function setMeta(k, left, right) {
   el.dataset.y = '0';
   paintTwo(el);
 }
-function normMetaParts(k, d) {
-  const left = (k === 'zt' || k === 'dt') ? (d.date || d.source || '—') : (d.source || '—');
+const normMetaParts = (k, d) => {
+  const left = (k === 'zt' || k === 'dt' || k === 'ld')
+    ? (d.date || d.source || '—') : (d.source || '—');
   return [left, d.elapsed != null ? d.elapsed + 's' : '—'];
-}
+};
 function restoreMeta(k) {
   const el = $(META_EL[k]); if (!el) return;
   const d = META_DATA[k]();
@@ -4637,7 +4809,7 @@ function restoreMeta(k) {
 }
 
 /* 一次自动刷新失败：倒计时回滚到「30 秒后重试」，并在该板块显示失败文案 */
-const autoFailed = { scan: 0, swing: 0, ai: 0, zt: 0, dt: 0 };
+const autoFailed = { scan: 0, swing: 0, ai: 0, zt: 0, dt: 0, ld: 0 };
 function autoFail(k) {
   const cfg = AUTO[k];
   autoFailed[k] = Date.now();
@@ -4651,7 +4823,7 @@ function autoFail(k) {
    刚休市时只让已开启的板块各补扫一轮（拿到收盘定格数据），随后整体暂停；
    开盘再自动恢复并立刻补一轮。补扫名额逐板块消费，遵守原有 AUTO_MAX_RUN
    并发上限，失败也不重试，避免休市期间反复打接口。 */
-const autoClosePending = { scan: false, swing: false, ai: false, zt: false, dt: false };
+const autoClosePending = { scan: false, swing: false, ai: false, zt: false, dt: false, ld: false };
 let autoMktPrev = null;          // 上一拍的市场状态；null = 页面刚打开
 
 function autoMarketState() {
@@ -5137,6 +5309,8 @@ function renderAI() {
         <span class="ai-name">${esc(x.name)}</span>
         <span class="ai-code">${esc(x.code)}</span>
         ${buyBadgeHtml(x)}
+        ${x._fast ? '<span class="ai-flag" title="用上次扫描缓存的日K换算，完整复核后自动替换">缓存换算</span>' : ''}
+        ${x._new ? '<span class="ai-flag new" title="完整口径复核后新进入榜单">复核新进</span>' : ''}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
       ${dimBadges(x)}
@@ -5243,7 +5417,9 @@ if ($('#stockSearchInput')) $('#stockSearchInput').addEventListener('keydown', e
 });
 
 /* AI 荐股「多日持股算法」开关：纯本板块私有，不记忆、默认关。
-   只影响 runAI 这一次请求的 algo 参数，绝不写设置、不碰其他板块。 */
+   只影响本次请求的 algo 参数，绝不写设置、不碰其他板块。
+   v1.6.6：开关本身即触发——先清空列表显示加载中，用缓存的日K秒出一版，
+   紧接着自动按完整口径复核替换。不再要求用户二次点击「开始 AI 选股」。 */
 function aiUseSwing() { const el = $('#aiSwingChk'); return !!(el && el.checked); }
 function syncAiSwingUI() {
   const on = aiUseSwing();
@@ -5253,12 +5429,156 @@ function syncAiSwingUI() {
     : '开启后按趋势波段口径筛选（仅影响 AI 荐股）';
   if (row) row.style.background = on ? 'rgba(233,185,73,.1)' : 'var(--bg2,#182231)';
 }
+
+/* 切换算法时的请求时序控制：token 递增，旧请求回来一律丢弃，
+   避免「快速换算还没回、用户又切回 AI 口径」时旧结果覆盖新选择。 */
+let aiToken = 0, aiNoticeTimer = null;
+const AI_SWING_LOADING = '正在按多日持股口径换算…<br /><span style="font-size:11px;color:#5F6B80">用上次扫描缓存的日K重算，约 1–3 秒</span>';
+const AI_SWING_SLOW = '缓存不足，正在按完整口径扫描…<br /><span style="font-size:11px;color:#5F6B80">约 20–40 秒，不用再点按钮</span>';
+
+function aiEmptyText(html) {
+  const el = $('#aiEmpty');
+  if (!el) return;
+  el.innerHTML = html;
+  el.style.display = '';
+}
+
+function aiShowNotice(kind, html, hideMs) {
+  const el = $('#aiNotice');
+  if (!el) return;
+  el.className = 'ai-notice ' + kind;
+  el.innerHTML = `<span class="ic">${kind === 'done' ? '✓' : '◔'}</span><div style="flex:1">${html}</div>`;
+  el.style.display = 'flex';
+  clearTimeout(aiNoticeTimer);
+  if (hideMs) aiNoticeTimer = setTimeout(() => { el.style.display = 'none'; }, hideMs);
+}
+
+function aiHideNotice() {
+  const el = $('#aiNotice');
+  clearTimeout(aiNoticeTimer);
+  if (el) el.style.display = 'none';
+}
+
+function aiQuery(fast, swing) {
+  const qs = new URLSearchParams({
+    universe: $('#aiUniverse').value,
+    min_score: $('#aiMinScore').value,
+    top: $('#aiTop').value,
+  });
+  if (swing) qs.set('algo', 'swing');
+  if (fast) qs.set('fast', '1');
+  return '/api/ai_pick?' + qs;
+}
+
+function applyAIResult(r) {
+  state.ai = r;
+  dimFoldAll();                 // 先按本地开关校正，避免后端口径覆盖
+  syncSource(r);
+  $('#aiTotal').textContent = r.total;
+  $('#aiBase').textContent = r.base;
+  $('#aiDeep').textContent = r.deep;
+  $('#aiCount').textContent = (r.list || []).filter(inPF).length;
+  setMeta('ai', r.source || '—', r.elapsed + 's');
+  renderAI();
+  markUpd('ai', r);
+}
+
+/* 完整口径扫描（开关触发的自动复核 / 快速换算失败后的降级都走这里）。
+   fastList 是快速版榜单，用来标出「复核新进」的票。 */
+async function aiFullScan(swing, token, fastList) {
+  state.aiLoading = true;
+  const btn = $('#btnAI');
+  if (btn && swing) { btn.disabled = true; btn.textContent = '完整复核中…'; }
+  const started = Date.now();
+  const tick = setInterval(() => {
+    setMeta('ai', '扫描中', Math.round((Date.now() - started) / 1000) + 's');
+  }, 1000);
+  try {
+    const r = await api(aiQuery(false, swing));
+    if (token !== aiToken) return false;          // 用户又切了算法：丢弃本次结果
+    if (!r || r.ok === false) throw new Error((r && r.error) || '接口返回异常');
+    (r.list || []).forEach(x => { delete x._fast; });
+    if (swing) {
+      const prev = new Set((fastList || []).map(x => String(x.code)));
+      (r.list || []).forEach(x => { if (prev.size && !prev.has(String(x.code))) x._new = true; });
+      state.aiSwingFull = r;
+      applyAIResult(r);
+      // 复核完成提示只停留 3 秒，随后收起，下面网格回到原位
+      aiShowNotice('done', `已按完整口径复核 · <b>${(r.list || []).filter(inPF).length}</b> 只入选` +
+        (prev.size ? `（快速版 ${prev.size} 只）` : '') + ` · ${r.elapsed}s`, 3000);
+    } else {
+      state.aiNormal = r;
+      applyAIResult(r);
+      aiHideNotice();
+    }
+    return true;
+  } catch (e) {
+    if (token !== aiToken) return false;
+    if (swing) aiShowNotice('work', '完整复核失败，当前是缓存换算结果，稍后可点按钮重扫', 5000);
+    else toast('AI 选股失败：行情接口可能限流，稍后重试', 3000);
+    return false;
+  } finally {
+    clearInterval(tick);
+    if (token === aiToken) {                      // 只有仍是当前选择时才恢复状态
+      state.aiLoading = false;
+      restoreMeta('ai');
+      if (btn) { btn.disabled = false; btn.textContent = '开始 AI 选股'; }
+    }
+  }
+}
+
+/* 开关变化：清空 → 缓存换算 → 自动完整复核。
+   关掉开关时直接恢复上一次 AI 口径的结果，不重新联网。 */
+async function aiOnAlgoChange() {
+  const swing = aiUseSwing();
+  const token = ++aiToken;
+  aiHideNotice();
+  // 上一次切换留下的在途请求已被 token 作废，这里同步解开 loading，
+  // 否则「快速换算还没回就切回去」会把面板永久卡在加载态。
+  state.aiLoading = false;
+  state.ai = null;                 // 直接清空，避免旧口径的卡片被误读成新口径
+  state.aiFast = null;
+  renderAI();
+
+  if (!swing) {
+    if (state.aiNormal) { applyAIResult(state.aiNormal); return; }
+    aiEmptyText('正在按 AI 多因子口径扫描…');
+    aiFullScan(false, token, null);
+    return;
+  }
+
+  aiEmptyText(AI_SWING_LOADING);
+  state.aiLoading = true;
+  try {
+    const r = await api(aiQuery(true, true));
+    if (token !== aiToken) return;
+    if (r && r.insufficient) {                    // 缓存不够：不拿子集冒充结果，直接完整扫描
+      aiEmptyText(AI_SWING_SLOW);
+      state.aiLoading = false;
+      aiFullScan(true, token, []);
+      return;
+    }
+    if (!r || r.ok === false) throw new Error((r && r.error) || '接口返回异常');
+    (r.list || []).forEach(x => { x._fast = true; });
+    state.aiFast = r;
+    state.aiLoading = false;
+    applyAIResult(r);
+    aiShowNotice('work', `快速换算完成 · 命中缓存 <b>${r.cache_hit}/${r.cache_pool}</b> 只 · 正在按完整口径复核…`);
+    aiFullScan(true, token, r.list || []);
+  } catch (e) {
+    if (token !== aiToken) return;
+    state.aiLoading = false;
+    aiEmptyText('缓存换算失败，正在改走完整扫描…');
+    aiFullScan(true, token, []);
+  }
+}
+
 if ($('#aiSwingChk')) {
   $('#aiSwingChk').checked = false;   // 默认关、不记忆，刷新后强制复位
   syncAiSwingUI();
   $('#aiSwingChk').addEventListener('change', () => {
     syncAiSwingUI();
-    // 切换算法不改变已扫描的结果，避免误以为要重扫；点「开始 AI 选股」后按新口径出结果
+    aiOnAlgoChange();
   });
 }
 
@@ -5290,6 +5610,9 @@ async function runAI(silent) {
     if (aiUseSwing()) qs.set('algo', 'swing');   // 仅本次 AI 荐股请求切到多日持股算法
     const r = await api('/api/ai_pick?' + qs, prog ? { signal: prog.signal } : {});
     if (!r || r.ok === false) throw new Error((r && r.error) || '接口返回异常');
+    (r.list || []).forEach(x => { delete x._fast; delete x._new; });   // 手动/自动重扫：去掉旧角标
+    if (aiUseSwing()) state.aiSwingFull = r; else state.aiNormal = r;
+    aiHideNotice();
     state.ai = r;
     dimFoldAll();                 // 新响应先按本地开关校正，避免后端口径覆盖（含自动重扫）
     syncSource(r);
@@ -5725,6 +6048,143 @@ $$('#dtSeg button').forEach(b => {
   };
 });
 
+/* ------------------ 龙头分析 ------------------ */
+/* 板块层 → 龙头 / 跟随，全部数据由后端一次算完；前端只做排版与搜索过滤。 */
+const ldN = (v, d = 2) => (Number.isFinite(+v) ? (+v).toFixed(d) : '—');
+const ldSign = v => (+v > 0 ? '+' : '');
+
+function renderLD() {
+  const grid = $('#ldGrid'), empty = $('#ldEmpty');
+  if (!grid) return;
+  const d = state.ldd;
+  if (!d) { grid.innerHTML = ''; if (empty) empty.style.display = ''; return; }
+  const kw = String(state.search || '').trim().toLowerCase();
+  const hit = z => [z.code, z.name].some(v => String(v == null ? '' : v).toLowerCase().includes(kw));
+  const list = (d.list || []).filter(b => !kw || [b.name, b.cat, b.leader && b.leader.name]
+    .some(v => String(v == null ? '' : v).toLowerCase().includes(kw))
+    || hit(b.leader || {}) || (b.followers || []).some(hit));
+
+  const card = (b, i) => {
+    const L = b.leader || {};
+    const hd = L.hd || (L.lu ? '首板' : '');
+    const flows = (b.followers || []).map(z => `<span class="lt-f${(z.boards || 0) >= 2 ? ' hot' : ''}"
+        data-code="${esc(z.code)}" data-market="${esc(z.market)}"
+        title="点击查看 ${esc(z.name)} 的 K 线、分时与打分"><b>${esc(z.name)}</b><i
+        class="${fmt.cls(z.pct)} num">${ldSign(z.pct)}${ldN(z.pct)}%</i>${
+        z.hd ? `<em>${esc(z.hd)}</em>` : ''}</span>`).join('');
+    return `<article class="lt-card${i < 3 ? ' top' : ''}">
+      <div class="lt-top">
+        <span class="lt-rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="lt-name">${esc(b.name)}</span>
+        <span class="lt-src">${esc(b.src || '行业')}</span>
+        <span class="lt-pct num ${fmt.cls(b.pct)}">${ldSign(b.pct)}${ldN(b.pct)}%</span>
+      </div>
+      <div class="lt-meta">
+        <span>主力 <b class="${fmt.cls(b.net)}">${ldSign(b.net)}${ldN(b.net)} 亿</b></span>
+        <span>涨停 <b>${esc(b.lu)}</b></span>
+        <span>最高 <b>${esc(b.maxb)} 板</b></span>
+        <span>涨 <b class="up">${esc(b.up)}</b> 跌 <b class="down">${esc(b.down)}</b></span>
+      </div>
+      <div class="lt-hot"><i style="width:${Math.min(100, Math.max(8, +b.hot || 0))}%"></i></div>
+      ${b.cat ? `<div class="lt-cat"><b>催化</b> ${esc(b.cat)}</div>` : ''}
+      <div class="lt-sec">
+        <div class="lt-lb">龙头股</div>
+        <div class="lt-lead" data-code="${esc(L.code)}" data-market="${esc(L.market)}"
+             title="点击查看 ${esc(L.name)} 的 K 线、分时与打分">
+          <span class="lt-lname">${esc(L.name)}</span>
+          <span class="lt-lcode">${esc(L.code)}</span>
+          ${hd ? `<span class="lt-ltag">${esc(hd)}</span>` : ''}
+          <span class="lt-lpct num ${fmt.cls(L.pct)}">${ldSign(L.pct)}${ldN(L.pct)}%</span>
+        </div>
+        <div class="lt-lmeta">主力 <b class="${fmt.cls(L.net)}">${ldSign(L.net)}${ldN(L.net)} 亿</b>
+          · 成交 ${ldN(L.amount, 1)} 亿 · 换手 ${ldN(L.turn, 1)}% · 量比 ${ldN(L.vr)}</div>
+      </div>
+      <div class="lt-sec">
+        <div class="lt-lb">跟随股 <em>${(b.followers || []).length} 只</em></div>
+        <div class="lt-flow">${flows}</div>
+      </div>
+    </article>`;
+  };
+
+  grid.innerHTML = list.map(card).join('');
+  if (empty) {
+    empty.style.display = list.length ? 'none' : '';
+    if (!list.length) {
+      empty.innerHTML = kw ? '本板块没有匹配的板块或个股。'
+        : esc(d.empty || '当前没有符合条件的板块，等放量后再试。');
+    }
+  }
+  grid.querySelectorAll('[data-code]').forEach(el => {
+    el.onclick = () => openDetail(el.dataset.code, +el.dataset.market);
+  });
+}
+
+async function runLD(silent) {
+  if (state.ldLoading) return;
+  state.ldLoading = true;
+  const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
+  const btn = $('#btnLD');
+  const prog = quiet ? null : progressRun('正在梳理板块龙头…', [
+    [22, '扫描行业与概念板块资金流'],
+    [48, '拉取入选板块的主板成分股'],
+    [72, '按涨停 / 连板 / 资金排出龙头'],
+    [90, '整理跟随股与催化题材…']
+  ]);
+  if (!quiet) { btn.disabled = true; btn.textContent = '刷新中…'; lockScanBtns(true); }
+  $('#ldEmpty').style.display = 'none';
+  const before = state.ldd ? (state.ldd.list || []).length : undefined;
+  const started = Date.now();
+  const tick = setInterval(() => {
+    setMeta('ld', '分析中', Math.round((Date.now() - started) / 1000) + 's');
+  }, quiet ? 2000 : 500);
+  try {
+    const qs = new URLSearchParams({ boards: $('#ldBoards').value, follow: $('#ldFollow').value });
+    const r = await api('/api/leader?' + qs.toString(), prog ? { signal: prog.signal } : {});
+    if (!r || !r.ok) throw new Error((r && r.error) || '获取失败');
+    state.ldd = r;
+    syncSource(r);
+    $('#ldScan').textContent = numOrDash(r.scanned, 0);
+    $('#ldInflow').textContent = numOrDash(r.inflow, 0);
+    $('#ldCount').textContent = (r.list || []).length;
+    $('#ldCover').textContent = numOrDash(r.covered, 0);
+    setMeta('ld', r.date || '—', r.elapsed + 's');
+    renderLD();
+    markUpd('ld', r);
+    if (prog) prog.done();
+    const n = (r.list || []).length;
+    if (quiet) {
+      if (state.view === 'ld' && before !== undefined && before !== n) toast(`龙头榜自动刷新：${n} 个板块（原 ${before} 个）`);
+    } else if (n) {
+      toast(`龙头分析：${n} 个热门板块 · 覆盖 ${r.covered || 0} 只主板股`);
+    } else {
+      toast(r.empty || '当前没有符合条件的板块，等放量后再试', 2600);
+    }
+    return true;
+  } catch (e) {
+    const canceled = e && (e.name === 'AbortError') && prog && prog.signal.aborted;
+    if (quiet) { if (state.view === 'ld') toast('龙头榜自动刷新失败，下个周期再试', 2200); }
+    else if (canceled) {
+      if (!state.ldd) $('#ldEmpty').style.display = '';
+    } else {
+      toast('龙头分析失败：接口可能限流，稍后重试');
+      if (!state.ldd) $('#ldEmpty').style.display = '';
+    }
+    return false;
+  } finally {
+    clearInterval(tick);
+    if (prog && scanAbort === prog.ctl) scanAbort = null;   // 谁建谁清，不碰别的扫描的控制器
+    restoreMeta('ld');
+    state.ldLoading = false;
+    if (prog) prog.stop();
+    if (!quiet) { setLoading(false); lockScanBtns(false); btn.disabled = false; btn.textContent = '刷新龙头榜'; }
+  }
+}
+
+$('#btnLD').onclick = () => { if (autoBusy('ld')) return toast('正在刷新中，稍等几秒', 1800); runLD(); };
+['#ldBoards', '#ldFollow'].forEach(sel => {
+  $(sel).onchange = () => { if (!autoBusy('ld')) runLD(); };
+});
+
 /* ------------------ 视图切换 ------------------ */
 /* 手机端真正的滚动容器是 body（html,body 固定 100% 高 + overflow-x:hidden），
    window.scrollTo(0,0) 在这里不生效；切板块后回到顶部，避免停在新板块的半中间。 */
@@ -5745,7 +6205,7 @@ $$('.tab').forEach(t => {
       state.grade = 'all';
       $$('#gradeSeg button').forEach(b => b.classList.toggle('on', b.dataset.g === 'all'));
     }
-    ['scan', 'ai', 'zt', 'dt', 'review', 'strategy'].forEach(v => $('#view-' + v).style.display = v === state.view ? '' : 'none');
+    ['scan', 'ai', 'zt', 'dt', 'ld', 'review', 'strategy'].forEach(v => $('#view-' + v).style.display = v === state.view ? '' : 'none');
     // 切板块时按最新开关状态重绘目标板块：开关 / 公告刷新重算的是数据，
     // 只切 display 会让其它板块的卡片仍显示旧分数与旧徽章（看起来像开关没生效）。
     renderCurrent();
@@ -5753,10 +6213,11 @@ $$('.tab').forEach(t => {
     // v1.6.3 并发互斥：任何板块在扫时，切板块不再自动叠加新扫描——旧逻辑会互踩
     // 取消控制器/进度浮层/按钮锁（静默自动重扫不受影响，它们不走浮层）。
     // 想看哪个板块就等当前扫描结束后手动点刷新。
-    if (!state.scanning && !state.aiLoading && !state.ztdLoading && !state.dtdLoading) {
+    if (!state.scanning && !state.aiLoading && !state.ztdLoading && !state.dtdLoading && !state.ldLoading) {
       if (state.view === 'ai' && !state.ai && !state.aiLoading) runAI();
       if (state.view === 'zt' && !state.ztd && !state.ztdLoading) runZT();
       if (state.view === 'dt' && !state.dtd && !state.dtdLoading) runDT();
+      if (state.view === 'ld' && !state.ldd && !state.ldLoading) runLD();
     }
     scrollTopZero();
   };
@@ -5793,6 +6254,7 @@ const VIEW_RUN = {
   ai: () => runAI(false),
   zt: () => runZT(false),
   dt: () => runDT(false),
+  ld: () => runLD(false),
   review: () => runStockSearch()   // 复盘已改为股票搜索板块
 };
 function runCurrent() {

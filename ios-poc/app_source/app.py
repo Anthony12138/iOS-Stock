@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.6.5"
+VERSION = "1.6.9"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -733,6 +733,19 @@ def cached(key, ttl, producer):
                 return val
             raise val
     # while True：只有拿到结果或共享异常才会退出，绝不出现 N 个线程各自直连上游
+
+
+def cache_peek(key, max_age):
+    """只读缓存、绝不触发取数。给「用已拉取的数据快速换算」这类场景用：
+       没有缓存或超过 max_age 就返回 None，由调用方降级，热路径上不产生任何请求。"""
+    with _cache_lock:
+        hit = _cache.get(key)
+        if not hit:
+            return None
+        ts, val = hit
+        if time.time() - ts > max_age:
+            return None
+        return val
 
 
 # ---------------------------------------------------------------- 行情抓取
@@ -2967,6 +2980,12 @@ def ai_pick(params):
         for k in ("universe", "min_score", "top"):
             if k in params and params[k] not in (None, ""):
                 sp[k] = params[k]
+        # fast=1：开关刚打开时的即时换算，只用已缓存的日K，不额外联网。
+        # 前端拿到 insufficient 会立刻改走完整扫描，不需要用户再点按钮。
+        if str((params or {}).get("fast") or "") in ("1", "true", "yes"):
+            r = swing_pick_fast(sp)
+            r["note"] = "已按「多日持股」趋势波段口径换算（仅对 AI 荐股生效）。" + (r.get("note") or "")
+            return r
         r = swing_pick(sp)
         r["algo"] = "swing"
         r["note"] = "已按「多日持股」趋势波段口径筛选（本页开关，仅对 AI 荐股生效）。" + (r.get("note") or "")
@@ -3827,6 +3846,36 @@ def swing_evaluate(q, bars, pe_sorted, pb_sorted, survey=None, idx_gain=None,
     return res
 
 
+def _swing_base(rows, p):
+    """多日持股的初筛：只做内存过滤，不产生任何请求。
+       swing_pick（完整重扫）与 swing_pick_fast（缓存换算）共用同一份口径，
+       避免两处过滤条件漂移、导致快速版与完整版榜单口径不一致。"""
+    base = []
+    for q in rows:
+        if q["volume"] <= 0 or is_bad_name(q["name"], True):
+            continue
+        if bad_symbol(q["name"]) or not list_days_ok(q.get("list_date")):
+            continue
+        if q["amount"] / 1e8 < p["min_amount"]:
+            continue
+        if not (p["fcap_min"] <= q["fcap"] / 1e8 <= p["fcap_max"]):
+            continue
+        if not (p["pct_min"] <= q["pct"] <= p["pct_max"]):
+            continue
+        if q["turnover"] < 0.8:      # 太冷清的票多日也拉不动
+            continue
+        base.append(q)
+    return base
+
+
+def _swing_prescore(q, fund_degraded):
+    """多日持股的预排序：偏好温和放量 + 主力净流入，不奖励当天大涨。"""
+    nr = q["main_net"] / q["fcap"] * 100 if q["fcap"] else 0
+    heat = 1.6 if 0 <= q["pct"] <= 4 else 0.6
+    fund = (min(q["turnover"], 12) * 1.0 + min(q["volratio"], 3) * 2) if fund_degraded else (nr * 5)
+    return fund + min(q["volratio"], 3) * 4 + q["pct"] * heat + min(q["turnover"], 12) * 0.8
+
+
 def swing_pick(params):
     t0 = time.time()
     p = dict(SWING_DEFAULTS)
@@ -3857,37 +3906,15 @@ def swing_pick(params):
     pb_sorted = sorted([q["pb"] for q in rows if 0.3 < q.get("pb", 0) < 20])
     pe_by_ind = _industry_pe(rows)
 
-    base = []
-    for q in rows:
-        if q["volume"] <= 0 or is_bad_name(q["name"], True):
-            continue
-        if bad_symbol(q["name"]) or not list_days_ok(q.get("list_date")):
-            continue
-        if q["amount"] / 1e8 < p["min_amount"]:
-            continue
-        if not (p["fcap_min"] <= q["fcap"] / 1e8 <= p["fcap_max"]):
-            continue
-        if not (p["pct_min"] <= q["pct"] <= p["pct_max"]):
-            continue
-        if q["turnover"] < 0.8:      # 太冷清的票多日也拉不动
-            continue
-        base.append(q)
-
+    base = _swing_base(rows, p)
     fund_degraded = bool(base) and all(not q.get("main_net") for q in base)
-
-    def prescore(q):
-        # 多日持股：偏好温和放量 + 主力净流入，不奖励当天大涨
-        nr = q["main_net"] / q["fcap"] * 100 if q["fcap"] else 0
-        heat = 1.6 if 0 <= q["pct"] <= 4 else 0.6
-        fund = (min(q["turnover"], 12) * 1.0 + min(q["volratio"], 3) * 2) if fund_degraded else (nr * 5)
-        return fund + min(q["volratio"], 3) * 4 + q["pct"] * heat + min(q["turnover"], 12) * 0.8
 
     if any(not q["volratio"] for q in base):
         base, filled = enrich_volratio(base)
         if filled:
             source += "+腾讯"
 
-    base.sort(key=lambda q: -prescore(q))
+    base.sort(key=lambda q: -_swing_prescore(q, fund_degraded))
     # 用副本构造候选：下面会给每只写 _rs_rank 派生字段，绝不能原地改 fetch_snapshot()
     # 的共享 rows（缓存 25 秒内被所有板块复用），否则会污染下一个板块的评分口径。
     cand = [dict(q) for q in base[: int(p["universe"])]]
@@ -3947,6 +3974,124 @@ def swing_pick(params):
         "params": p,
         "note": (_cap_note + "多日持股口径：不看当天涨了多少，看中期趋势（MA20/MA60）、均线结构、量能是否温和、"
                  "位置是否贴近 MA20。持仓天数、止损位、目标位由 ATR 与均线算出。"),
+    }
+
+
+# 快速换算只认 30 分钟内的日K缓存：日线级别指标对几分钟的延迟不敏感，
+# 但也不能无限期用旧数据，否则停牌/除权的票会拿错价格。
+FAST_KLINE_MAX_AGE = 1800
+
+
+def swing_pick_fast(params):
+    """「用已拉取的数据」按多日持股口径快速换算一版，全程不拉日K、不联网。
+
+    场景：AI 荐股面板打开「多日持股算法」开关的那一刻。上次 AI 扫描已经把
+    候选股的 400 根日K 存进缓存，这里直接拿缓存跑同一个 swing_evaluate，
+    1~3 秒就能出榜单，不必等完整重扫的 30~60 秒。
+
+    与 swing_pick 的差别只有一个：候选集是「本次快照初筛 ∩ 已有缓存」，
+    所以结果是完整版的子集（可能少几只）。前端会标注「缓存换算」，
+    并紧接着自动跑一次完整口径复核来替换，不会让子集冒充最终榜单。
+
+    命中缓存太少（刚启动 / 缓存过期）时返回 insufficient=True，
+    由前端直接降级为完整扫描，不返回半截榜单误导用户。"""
+    t0 = time.time()
+    p = dict(SWING_DEFAULTS)
+    for k, v in (params or {}).items():
+        if k in p and v not in (None, ""):
+            p[k] = coerce_param(SWING_DEFAULTS[k], v)
+
+    _cap_note = ""
+    if LIGHT and int(p["universe"]) > 100:
+        p["universe"] = 100
+        _cap_note = "手机轻量模式：候选池封顶 100 只。"
+
+    # 快照本身有 25 秒缓存，刚扫完 AI 必命中；万一没命中也只是多一次快照请求，
+    # 比完整重扫（几十只日K全线拉取）便宜得多。
+    pack = fetch_snapshot()
+    rows, source = pack["rows"], pack["source"]
+    pe_sorted = sorted([q["pe_ttm"] for q in rows if 1 < q.get("pe_ttm", 0) < 200])
+    pb_sorted = sorted([q["pb"] for q in rows if 0.3 < q.get("pb", 0) < 20])
+    pe_by_ind = _industry_pe(rows)
+    ind_gain = industry_gain(rows)
+    env = market_env(rows)
+
+    base = _swing_base(rows, p)
+    fund_degraded = bool(base) and all(not q.get("main_net") for q in base)
+    base.sort(key=lambda q: -_swing_prescore(q, fund_degraded))
+
+    pool = base[: int(p["universe"])]
+    cand = []
+    for q in pool:
+        bars = cache_peek(f"k:{q['market']}:{q['code']}", FAST_KLINE_MAX_AGE)
+        if bars and len(bars) >= 130:      # 与 swing_pick 的 K 线长度门槛一致
+            cand.append((q, bars))
+
+    if len(cand) < 6:
+        return {
+            "ok": True, "mode": "swing", "algo": "swing", "fast": True,
+            "insufficient": True, "cache_hit": len(cand), "cache_pool": len(pool),
+            "source": source, "total": len(rows), "base": len(base), "deep": 0,
+            "hit": 0, "list": [], "params": p,
+            "elapsed": round(time.time() - t0, 2),
+            "note": "缓存不足，直接按完整口径扫描。",
+        }
+
+    # 上证 20 日涨幅也只用缓存：拿不到就传 None（该维度不加分不扣分），
+    # 这样快速换算真的做到零网络请求。
+    idx_gain = cache_peek("index_gain20", 3600)
+    try:
+        survey = fetch_survey(30)          # 与 AI 扫描共用缓存，正常不会产生请求
+    except Exception:
+        survey = {}
+
+    def work(pair):
+        q, bars = pair
+        try:
+            return swing_evaluate(q, bars, pe_sorted, pb_sorted, survey, idx_gain,
+                                  pe_by_ind, env, defer_metrics=True)
+        except Exception:
+            return None
+
+    results, errors = [], 0
+    with ThreadPoolExecutor(max_workers=_wn(8)) as ex:
+        for r in ex.map(work, cand):
+            if r is None:
+                errors += 1
+            else:
+                results.append(r)
+
+    results.sort(key=lambda x: (-x["score"], -x["ind_count"]))
+    passed = [x for x in results if x["score"] >= p["min_score"] and x["ind_count"] >= p["min_ind"]]
+
+    top, seen = [], {}
+    for x in passed:
+        ind = (x.get("industry") or "").strip()
+        if ind:
+            if seen.get(ind, 0) >= 3:
+                continue
+            seen[ind] = seen.get(ind, 0) + 1
+        top.append(x)
+        if len(top) >= int(p["top"]):
+            break
+
+    for x in top:
+        sm, pre, wk = x.pop("_sm", None), x.pop("_pre", None), x.pop("_wk", None)
+        x["plan"] = swing_plan(sm, sm["c"], x.get("price"))
+        x["trade"] = x["plan"]
+        x["metrics"] = _swing_detail(sm, wk, pre)
+
+    return {
+        "ok": True, "mode": "swing", "algo": "swing", "fast": True, "partial": True,
+        "cache_hit": len(cand), "cache_pool": len(pool),
+        "source": source, "env": env, **snap_meta(pack),
+        "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+        "market": market_status(),
+        "total": len(rows), "base": len(base), "deep": len(cand),
+        "hit": len(passed), "errors": errors, "elapsed": round(time.time() - t0, 1),
+        "list": top, "params": p,
+        "note": (_cap_note + "快速换算：用上次扫描已缓存的日K（命中 %d/%d 只）按多日持股口径重算，"
+                 "未额外联网，完整口径复核随后自动进行。" % (len(cand), len(pool))),
     }
 
 
@@ -6612,6 +6757,250 @@ def _jsonable(o):
     return o
 
 
+# ---------------------------------------------------------------- 龙头分析
+# 热门板块 → 龙头股 → 跟随股。板块资金与成分股取自东财公开行情，
+# 涨停 / 连板 / 涨停原因取同花顺涨停池（与涨停分析共用 fetch_zt_pool，口径一致）。
+LD_BF = "f2,f3,f6,f8,f10,f12,f13,f14,f20,f21,f62,f104,f105,f128,f136,f184,f207"
+# 统计型 / 指数型板块名：它们不是一条资金主线（「昨日涨停」「融资融券」「基金重仓」
+# 「同花顺概念」这类是按条件筛出来的股票集合），混进来会顶掉真正在做的主线。
+LD_BLACK = ("昨日", "融资融券", "沪股通", "深股通", "机构重仓", "基金重仓", "社保重仓",
+            "QFII", "券商重仓", "保险重仓", "信托重仓", "预盈预增", "预亏预减", "破净",
+            "高送转", "次新股", "股权转让", "举牌", "增持回购", "股权激励", "员工持股",
+            "MSCI", "标普", "富时", "转债", "B股", "AB股", "低价股", "高价股", "百元股",
+            "壳资源", "IPO受益", "参股", "同花顺", "东方财富", "转融通", "深成500",
+            "中证", "上证", "创业板", "科创板", "历史新高", "历史新低", "创新高",
+            "创新低", "连板", "涨停", "跌停", "换手", "量比", "振幅", "解禁",
+            "大宗交易", "龙虎榜", "摘帽", "填权", "贴权", "业绩", "高股息", "红利",
+            "低市盈", "市净率", "破发", "增仓", "减仓", "重仓", "基金", "券商", "保险")
+LD_DEFAULTS = {"boards": 8, "follow": 6}
+LD_MIN_AMT = 40e8        # 板块成交额不到 40 亿：资金不够集中，谈不上主线
+LD_MIN_MAIN = 5          # 主板成分股不足 5 只：样本太小，龙头没有代表性
+LD_LIMIT_PCT = 9.8       # 主板涨停判定（20cm 不在主板范围）
+LD_CAND_MAX = 16         # 单轮最多评估 16 个候选板块，手机端两波并发就能跑完
+
+
+def _ld_f(v, d=0.0):
+    """东财对停牌股和部分板块字段返回 "-"，直接参与算术会抛类型错误。"""
+    try:
+        x = float(v)
+        return x if math.isfinite(x) else d
+    except (TypeError, ValueError):
+        return d
+
+
+def _ld_clip(x, lo=0.0, hi=1.0):
+    return max(lo, min(hi, x))
+
+
+def _ld_pctile(v, arr):
+    if not arr:
+        return 0.5
+    return sum(1 for a in arr if a <= v) / len(arr)
+
+
+def _ld_board_page(t, pz=100):
+    """行业(t=2) / 概念(t=3) 板块榜，按主力净额降序。"""
+    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=%d&po=1&np=1&fltt=2"
+           "&invt=2&fid=f62&fs=m:90+t:%d&fields=%s" % (pz, t, LD_BF))
+    return (http_json(url, timeout=8, retries=2) or {}).get("data") or {}
+
+
+def _ld_members(bk):
+    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2"
+           "&invt=2&fid=f62&fs=b:%s&fields=f2,f3,f6,f8,f10,f12,f13,f14,f21,f62"
+           % urllib.parse.quote(str(bk)))
+    return ((http_json(url, timeout=8, retries=2) or {}).get("data") or {}).get("diff") or []
+
+
+def _ld_hot(c, b):
+    """板块热度：涨停家数 40 / 资金强度 24 / 板块涨幅 22 / 成交额 14。"""
+    return (0.40 * min(b["lu"], 6) / 6 * 100
+            + 0.24 * _ld_clip(c["strength"] / 1.2) * 100
+            + 0.22 * _ld_clip((c["pct"] + 1) / 5) * 100
+            + 0.14 * _ld_clip(c["amount"] / 600e8) * 100)
+
+
+def _ld_build_board(c, zmap):
+    """板块成分股打分并排出龙头。个股分数＝涨幅 30 / 资金占成交额 25 / 成交额 20 /
+       换手 15 / 量比 10，涨停再直接加分。龙头判定先看涨停、再看连板数、
+       最后才比分数——盘面上的「龙头」就是最高板那只，不会出现龙头首板而板块
+       另有二板的矛盾。"""
+    ms = _ld_members(c["code"])
+    main = []
+    for m in ms:
+        code = str(m.get("f12") or "")
+        name = str(m.get("f14") or "")
+        if not is_main_board(code) or "ST" in name.upper() or "退" in name:
+            continue
+        if _ld_f(m.get("f2")) <= 0:                 # 停牌
+            continue
+        main.append(m)
+    amts = sorted(_ld_f(m.get("f6")) for m in main)
+    turns = sorted(_ld_f(m.get("f8")) for m in main)
+    rows = []
+    for m in main:
+        code = str(m.get("f12") or "")
+        pct, net, amt = _ld_f(m.get("f3")), _ld_f(m.get("f62")), _ld_f(m.get("f6"))
+        turn, vr = _ld_f(m.get("f8")), _ld_f(m.get("f10"))
+        rel = (net / amt) if amt else 0.0
+        s = (0.30 * _ld_clip(pct / 10.0) + 0.25 * _ld_clip(rel / 0.25)
+             + 0.20 * _ld_pctile(amt, amts) + 0.15 * _ld_pctile(turn, turns)
+             + 0.10 * _ld_clip((vr - 0.8) / 3))
+        z = zmap.get(code) or {}
+        boards = parse_boards(z.get("high_days")) if z else 0
+        lu = pct >= LD_LIMIT_PCT or boards >= 1
+        if lu:
+            s += 0.12 + 0.02 * min(boards, 4)
+        rows.append({"name": str(m.get("f14") or ""), "code": code,
+                     "market": 1 if str(m.get("f13")) == "1" else 0,
+                     "price": round(_ld_f(m.get("f2")), 2),
+                     "pct": round(pct, 2), "net": round(net / 1e8, 2),
+                     "amount": round(amt / 1e8, 2), "turn": round(turn, 2),
+                     "vr": round(vr, 2), "lu": lu, "boards": boards,
+                     "hd": str(z.get("high_days") or ""),
+                     "reason": str(z.get("reason") or "").strip(),
+                     "score": round(_ld_clip(s) * 100, 1)})
+    rows.sort(key=lambda z: (-(1 if z["lu"] else 0), -z["boards"], -z["score"]))
+    cats = []
+    for z in rows[:8]:
+        for part in re.split(r"[+＋]", z.get("reason") or ""):
+            part = part.strip()
+            if not part or any(b in part for b in LD_BLACK):
+                continue
+            if part not in cats:
+                cats.append(part)
+    return {"main_n": len(main), "all": len(ms),
+            "lu": sum(1 for z in rows if z["lu"]),
+            "maxb": max([z["boards"] for z in rows] or [0]),
+            "cat": " · ".join(cats[:3])[:26], "rows": rows}
+
+
+def leader_analysis(params):
+    """龙头分析：先挑出资金最集中的板块，再在板块里分龙头与跟随。
+       整包缓存 25 秒（自动重扫最短 30 秒，够用且不会拿到旧行情）。"""
+    t0 = time.time()
+    p = dict(LD_DEFAULTS)
+    for k, v in (params or {}).items():
+        if k not in p or v in (None, ""):
+            continue
+        try:
+            n = int(float(v))
+        except (TypeError, ValueError):
+            continue
+        p[k] = max(2, min(n, 12 if k == "boards" else 10))
+
+    def build():
+        # 涨停池只拉一次：板块内哪些股在涨停、几板、涨停原因都从这里取
+        zmap, zdate, zsrc = {}, "", ""
+        try:
+            zpack = fetch_zt_pool() or {}
+            zdate = str(zpack.get("date") or "")
+            zsrc = str(zpack.get("source") or "")
+            for x in (zpack.get("pool") or []):
+                zmap[str(x.get("code") or "")] = x
+        except Exception:
+            pass
+
+        scanned, inflow, raw = 0, 0, []
+        for src_name, t in (("行业", 2), ("概念", 3)):
+            try:
+                page = _ld_board_page(t)
+            except Exception:
+                continue
+            scanned += int(page.get("total") or 0)
+            for x in (page.get("diff") or []):
+                nm = str(x.get("f14") or "")
+                if not nm or any(b in nm for b in LD_BLACK):
+                    continue
+                net, amt, pct = _ld_f(x.get("f62")), _ld_f(x.get("f6")), _ld_f(x.get("f3"))
+                if net <= 0:                       # 主力还在净流出的板块不是当下的主线
+                    continue
+                inflow += 1
+                if amt < LD_MIN_AMT or pct < -2.0:
+                    continue
+                cap = _ld_f(x.get("f21"))
+                up, dn = _ld_f(x.get("f104")), _ld_f(x.get("f105"))
+                ur = up / (up + dn) if (up + dn) else 0.5
+                strength = (net / cap * 100) if cap else 0.0
+                hot0 = (0.30 * _ld_clip((pct + 1) / 6) + 0.24 * _ld_clip(strength / 1.2)
+                        + 0.22 * ur + 0.24 * _ld_clip(amt / 600e8))
+                raw.append({"name": nm, "code": str(x.get("f12") or ""), "src": src_name,
+                            "hot0": round(hot0 * 100, 1), "strength": strength,
+                            "pct": round(pct, 2), "net": round(net / 1e8, 2),
+                            "amount": round(amt / 1e8, 1), "turn": round(_ld_f(x.get("f8")), 2),
+                            "vr": round(_ld_f(x.get("f10")), 2),
+                            "up": int(up), "down": int(dn),
+                            "lead": str(x.get("f128") or ""),
+                            "lead_pct": round(_ld_f(x.get("f136")), 2)})
+
+        # 同一条资金主线常被拆成两个名字（印制电路板 / 元件、半导体 / 半导体概念），
+        # 名称互相包含的只留热度高的那个，避免同一批票占两张卡
+        raw.sort(key=lambda z: -z["hot0"])
+        cand, seen = [], []
+        for c in raw:
+            if any(c["name"] in s or s in c["name"] for s in seen):
+                continue
+            seen.append(c["name"])
+            cand.append(c)
+            if len(cand) >= LD_CAND_MAX:
+                break
+
+        def one(c):
+            try:
+                return _ld_build_board(c, zmap)
+            except Exception:
+                return None
+
+        built = []
+        if cand:
+            with ThreadPoolExecutor(max_workers=_wn(8)) as ex:
+                built = list(ex.map(one, cand))
+
+        picks, used, tops, covered = [], set(), [], 0
+        for c, b in zip(cand, built):
+            if not b or b["main_n"] < LD_MIN_MAIN:
+                continue
+            # 行情弱的日子放宽：板块里还有涨停，或者板块本身红盘 / 主力仍在流入就留
+            if b["lu"] == 0 and c["pct"] < 0.2 and c["net"] < 5:
+                continue
+            top5 = set(z["code"] for z in b["rows"][:5])
+            if any(len(top5 & t) >= 2 for t in tops):
+                continue                       # 与已入选板块的重合度过高
+            rest = [z for z in b["rows"] if z["code"] not in used]
+            if not rest:
+                continue                       # 龙头已经被别的板块用掉
+            leader = rest[0]
+            followers = [z for z in rest[1:]
+                         if z["score"] >= 18 and (z["pct"] > 0 or (z["pct"] > -1.2 and z["net"] > 0))]
+            followers = followers[: p["follow"]]
+            if len(followers) < 2:
+                continue                       # 只有一只票的板块谈不上「跟随」
+            used.add(leader["code"])
+            tops.append(top5)
+            covered += len(rest)
+            picks.append({**c, "hot": round(_ld_hot(c, b), 1), "lu": b["lu"],
+                          "maxb": b["maxb"], "main_n": b["main_n"], "all": b["all"],
+                          "cat": b["cat"], "leader": leader, "followers": followers})
+            if len(picks) >= p["boards"]:
+                break
+
+        return {"ok": True, "mode": "leader",
+                "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+                "date": zdate or last_trade_date(),
+                "source": "东财板块 + 同花顺涨停池" if zsrc else "东财板块",
+                "market": market_status(), "scanned": scanned, "inflow": inflow,
+                "covered": covered, "elapsed": round(time.time() - t0, 1),
+                "list": picks, "params": p,
+                "empty": "" if picks else "当前没有资金净流入且成交额达标的板块，等放量后再试"}
+
+    key = "leader:%d:%d" % (p["boards"], p["follow"])
+    try:
+        return cached(key, 25, build)
+    except Exception as e:
+        return {"ok": False, "mode": "leader", "error": "龙头分析失败：%s" % e,
+                "elapsed": round(time.time() - t0, 1)}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -6692,6 +7081,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/limit_down":
                 params = {k: v[0] for k, v in qs.items()}
                 return self._json(limit_down_analysis(params))
+
+            if path == "/api/leader":
+                params = {k: v[0] for k, v in qs.items()}
+                return self._json(leader_analysis(params))
 
             if path == "/api/stock":
                 code = qs.get("code", [""])[0]
@@ -6784,19 +7177,19 @@ class Handler(BaseHTTPRequestHandler):
                 resp = {"ok": True, "code": code, "kline": bars, "trends": tr,
                         "quote": q if fresh_q else None,
                         "trade": trade, "metrics": detail_metrics(bars)}
-                # v1.6.4：一夜持股详情分时图叠加上证指数曲线，仅 scan 取；
-                # 与个股分时同一时刻口径（缓存 60 秒），失败时留空由前端跳过叠加。
-                if mode == "scan":
-                    try:
-                        _it = fetch_trends("000001", 1, ttl=8 if fast else 60)
-                        if _it and len(_it.get("points") or []) >= 20:
-                            # 备用源偶尔丢前收：用首个点位兜底，避免前端叠加时起点错位
-                            if not _it.get("prev_close"):
-                                _it = dict(_it)
-                                _it["prev_close"] = _it["points"][0]["price"]
-                            resp["idx_trends"] = _it
-                    except Exception:
-                        pass
+                # v1.6.7：所有板块的详情分时都叠加上证指数（以前只有 scan 取）。
+                # 与个股分时同一时刻口径，缓存 60 秒全站复用，多这一次请求基本无感；
+                # 失败时留空，由前端跳过叠加，不影响个股图。
+                try:
+                    _it = fetch_trends("000001", 1, ttl=8 if fast else 60)
+                    if _it and len(_it.get("points") or []) >= 20:
+                        # 备用源偶尔丢前收：用首个点位兜底，避免前端叠加时起点错位
+                        if not _it.get("prev_close"):
+                            _it = dict(_it)
+                            _it["prev_close"] = _it["points"][0]["price"]
+                        resp["idx_trends"] = _it
+                except Exception:
+                    pass
                 return self._json(resp)
 
             if path == "/api/scans":
