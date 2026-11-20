@@ -1,0 +1,65 @@
+name: Build iOS Python POC (ipa)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Python iOS support (3.11)
+        run: |
+          set -e
+          curl -fsSL \
+            "https://github.com/beeware/Python-Apple-support/releases/download/3.11-b13/Python-3.11-iOS-support.b13.tar.gz" \
+            -o py-ios.tgz
+          mkdir -p src
+          tar xzf py-ios.tgz -C src
+          echo "downloaded & extracted"
+          ls src/testbed | head
+
+      - name: Patch project (Python bootstrap + WKWebView + ATS)
+        run: python3 ios-poc/patch_project.py src/testbed ios-poc/overrides
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build archive (ad-hoc, no certificate needed)
+        run: |
+          set -e
+          cd src/testbed
+          xcodebuild archive \
+            -scheme iOSTestbed \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/poc.xcarchive" \
+            CODE_SIGN_IDENTITY='-' \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM='' \
+            PRODUCT_BUNDLE_IDENTIFIER='com.nightstock.poc' \
+            OTHER_LDFLAGS='$(inherited) -framework WebKit' \
+            -showBuildTimingSummary 2>&1 | tee "$RUNNER_TEMP/archive.log"
+
+      - name: Package unsigned/ad-hoc ipa from .app
+        run: |
+          set -e
+          APP="$RUNNER_TEMP/poc.xcarchive/Products/Applications/iOSTestbed.app"
+          test -d "$APP" || { echo "APP NOT FOUND"; find "$RUNNER_TEMP/poc.xcarchive" -maxdepth 4 -type d | head -30; exit 1; }
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qry "NightStock-iOS-POC.ipa" Payload
+          ls -lh NightStock-iOS-POC.ipa
+
+      - name: Upload ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NightStock-iOS-POC
+          path: ${{ runner.temp }}/NightStock-iOS-POC.ipa
+          retention-days: 30
