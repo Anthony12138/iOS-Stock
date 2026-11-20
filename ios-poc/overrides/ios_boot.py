@@ -1,7 +1,7 @@
 """
 iOS 启动垫片：把桌面版 app.py 原样跑在 iOS 内嵌的 CPython 里。
 
-与安卓端 android_boot.py 一一对应，业务逻辑零改动：
+与桌面版 app.py 一一对应，业务逻辑零改动（安卓端已于 v1.7.0 下线）：
   - 桌面版靠 `python app.py` 启动并自动开浏览器；
   - 移动端由原生壳调用 start(bundle_app_dir, runtime_dir)，
     只把 HTTP 服务跑起来，再把端口号回传给 WKWebView。
@@ -181,25 +181,50 @@ def start(bundle_app: str, runtime: str) -> int:
         return port
 
 
+def _probe(port: int, timeout: float = 1.5) -> bool:
+    """真连一次 /api/health，确认服务此刻还能响应。
+
+    v1.7.0：只查「对象还在、线程 is_alive」是不够的 —— iOS 挂起应用时会把
+    监听的 socket 掐成半死状态，Python 服务线程照样活着，但 accept 再也不来
+    请求，页面就一直是「服务异常」。所以必须真发一个 HTTP 请求过去。
+    """
+    if port <= 0:
+        return False
+    import urllib.request
+    try:
+        url = "http://127.0.0.1:%d/api/health" % port
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return 200 <= getattr(r, "status", 200) < 400
+    except Exception:
+        return False
+
+
 def ensure(bundle_app: str, runtime: str) -> int:
-    """前台唤醒时调用：服务还活着就返回原端口，被系统回收了就重启。
+    """前台唤醒时调用：服务还能响应就返回原端口，半死/被回收就重启。
 
     iOS 在后台挂起应用时会掐掉监听 socket，回前台后请求全部失败，
-    WKWebView 只能显示空白/黑屏。这里做一次存活检查：
-      - _srv 还在、socket 没关、服务线程还活着 → 直接返回原端口；
-      - 否则关掉旧对象、重新起一个（端口可能变化，由原生壳更新 URL）。
+    WKWebView 只能显示空白/黑屏。这里做两层存活检查：
+      1) 对象与线程还在（廉价，先排除明显死掉的）；
+      2) 真发一次 HTTP /api/health（1.5 秒）—— 这一步才能发现「线程活着但
+         接受不到请求」的半死状态。
+    任一层不过就关掉旧对象、重新起一个（端口可能变化，由原生壳更新 URL）。
+    探活在锁外做，避免 1.5 秒的重启流程卡住其它调用。
     """
     global _srv, _port
     with _lock:
+        srv, port = _srv, _port
+    if srv is not None and port > 0:
+        obj_ok = False
+        try:
+            srv.socket.getsockname()
+            obj_ok = any(t.name == "http" and t.is_alive() for t in threading.enumerate())
+        except Exception:
+            obj_ok = False
+        if obj_ok and _probe(port, 1.5):
+            return port
+    # 走到这里：要么没有服务，要么服务半死 → 清理后重启
+    with _lock:
         if _srv is not None:
-            alive = False
-            try:
-                _srv.socket.getsockname()
-                alive = any(t.name == "http" and t.is_alive() for t in threading.enumerate())
-            except Exception:
-                alive = False
-            if alive:
-                return _port
             try:
                 _srv.shutdown()
             except Exception:
@@ -210,7 +235,6 @@ def ensure(bundle_app: str, runtime: str) -> int:
                 pass
             _srv = None
             _port = 0
-    # 走到这里说明服务已失效，重新启动（start 内部持锁并复用全局状态）
     return start(bundle_app, runtime)
 
 

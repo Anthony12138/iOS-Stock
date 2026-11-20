@@ -2202,19 +2202,21 @@ function paintHealth(m, failed) {
   }
 }
 let healthBusy = false;
-async function health() {
+async function health(timeoutMs) {
   if (healthBusy) return;                             // 串行化：定时器与 visibilitychange 并发时不重复计数
   healthBusy = true;
   try {
     let r;
     try {
-      r = await api('/api/health', { timeout: 8000 });
+      r = await api('/api/health', { timeout: timeoutMs || 8000 });
     } catch (e) {
       healthFails++;
+      window.__svcFails = healthFails;                 // iOS 原生壳的探针要读这个值
       if (healthFails >= 2) paintHealth(null, true);   // 连续 2 次才翻脸
       return;
     }
     healthFails = 0;                                   // 成功一次即恢复
+    window.__svcFails = 0;
     const m = (r && r.market) || {};
     paintHealth(m, false);
     try { syncSource(r); } catch (e) {}                // 渲染异常不误报服务异常
@@ -2222,6 +2224,27 @@ async function health() {
     healthBusy = false;
   }
 }
+/* 回前台自愈（v1.7.0）：锁屏 / 合盖挂了几个小时，WebView 到本地服务的那条连接
+   可能已经废了（服务还在、页面却全部超时）。这里补一轮短超时心跳，失败就
+   0.8 / 2 / 4 秒重试；四拍都不通才整页重载，5 分钟内最多两次，防死循环。 */
+let svcRetryTimer = null, svcReloads = 0, svcReloadAt = 0;
+function healService() {
+  const waits = [800, 2000, 4000];
+  let i = 0;
+  const tick = async () => {
+    await health(2500);
+    if (healthFails === 0) { svcReloads = 0; return; }          // 通了就收工
+    if (i < waits.length) { svcRetryTimer = setTimeout(tick, waits[i]); i += 1; return; }
+    const now = Date.now();
+    if (now - svcReloadAt > 5 * 60 * 1000) svcReloads = 0;      // 冷却窗口外重新计数
+    if (svcReloads >= 2) return;
+    svcReloads += 1; svcReloadAt = now;
+    location.reload();                                          // 最后一招：整页重载
+  };
+  clearTimeout(svcRetryTimer);
+  svcRetryTimer = setTimeout(tick, 60);
+}
+window.__healService = healService;
 health(); setInterval(() => { if (!state.paused && !document.hidden) health(); }, 20000);
 
 /* ------------------ 参数 ------------------ */
@@ -2645,7 +2668,7 @@ const sansF = n => (n + FS) + 'px sans-serif';
 function setupCanvas(cv, h) {
   const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
   const w = cv.clientWidth || 600;
-  if (w > 0 && w < 480) h = Math.round(h * 0.86);   // 手机上把画布压矮一点，别占满一屏
+  if (w > 0 && w < 480) h = Math.round(h * 0.92);   // 手机上略压矮一点，但留够纵向空间给指数线
   cv.width = w * dpr; cv.height = h * dpr;
   cv.style.height = h + 'px';
   const ctx = cv.getContext('2d');
@@ -2683,7 +2706,8 @@ function drawTrend(cv, tr, item, idxTr) {
   const pts = packed.map(o => o.p), mins = packed.map(o => o.m);
   const T = 240;
   const volH = 34, gap = 12;
-  const P = { l: 50, r: 54, t: 16, b: 26 };
+  // 手机端把价格轴标签外的留白收到最小，绘图区多出 14px（窄屏上很值钱）
+  const P = w < 480 ? { l: 40, r: 50, t: 14, b: 26 } : { l: 48, r: 54, t: 16, b: 26 };
   const cw = w - P.l - P.r;
   const ch = h - P.t - P.b - volH - gap;
   const xm = m => P.l + m / T * cw;
@@ -2713,6 +2737,23 @@ function drawTrend(cv, tr, item, idxTr) {
     .filter(v => Number.isFinite(v) && v > 0);
   let hi = Math.max(...prices), lo = Math.min(...prices);
   const pad = Math.max((hi - lo) * 0.14, hi * 0.004); hi += pad; lo -= pad;
+  // v1.7.0：上证线仍以个股昨收为 0% 基准 —— 两条线相对昨收的高低差，就是「强于 / 弱于大盘」。
+  // 但不再硬套 0.40 图高：先按当日最大偏离定振幅（0.34 图高），再检查昨收线上下够不够，
+  // 不够就把价格轴往外扩 —— 蓝线完整，0% 又始终压在昨收虚线上，两个目的都保住。
+  let _idxAmp = 0;
+  if (_idxPacked.length >= 20) {
+    _idxAmp = ch * 0.34 / Math.max(_imaxDev, 0.0015);
+    const _devs = _idxPacked.map(o => +o.p.price / _iprev - 1);
+    const _dUp = Math.max(0, ..._devs), _dDn = Math.min(0, ..._devs);
+    // 昨收线在图上最高只能落到这里（下面要留 涨跌幅 × 振幅）
+    const _fDn = Math.min(0.80, Math.max(0.20, (ch - (-_dDn * _idxAmp + 10)) / ch));
+    const _A = hi - base, _B = base - lo;
+    if (_A > 0 && _B >= 0 && _A / (_A + _B) > _fDn) lo = base - (_A * (1 - _fDn) / _fDn);
+    // 反方向：昨收线最低只能到 需求高度，否则扩上界
+    const _fUp = Math.min(0.80, Math.max(0.20, (_dUp * _idxAmp + 10) / ch));
+    const _A2 = hi - base, _B2 = base - lo;
+    if (_A2 > 0 && _B2 >= 0 && _A2 / (_A2 + _B2) < _fUp) hi = base + (_fUp * _B2 / (1 - _fUp));
+  }
   const y = v => P.t + (hi - v) / (hi - lo) * ch;
   const lastP = pts[pts.length - 1].price;
   const isUp = lastP >= base;
@@ -2756,12 +2797,11 @@ function drawTrend(cv, tr, item, idxTr) {
     avgs.forEach((o, i) => i ? ctx.lineTo(xm(o.m), y(o.v)) : ctx.moveTo(xm(o.m), y(o.v)));
     ctx.strokeStyle = '#E9B949'; ctx.lineWidth = 1.3; ctx.stroke();
   }
-  // v1.6.7：上证指数分时（所有板块都画，蓝色实线 + 独立振幅）。
-  // 以指数昨收对齐个股昨收线，按当日最大偏离铺开（上下各 40% 图高），
-  // 指数几乎不动时用 0.15% 作下限，避免把噪声放大成假波动。
+  // v1.7.0：上证指数分时（所有板块都画）。0% 锚在个股昨收线上，
+  // 上下的空档由上面的价格轴扩展保证，因此不会再被裁掉。
   if (_idxPacked.length >= 20) {
-    const _amp = ch * 0.40 / Math.max(_imaxDev, 0.0015);
-    const yIdx = r => y(base) - (r - 1) * _amp;      // r = idxPrice / idxPrev
+    const _anchorY = y(base);                         // 指数 0% = 个股昨收虚线
+    const yIdx = r => _anchorY - (r - 1) * _idxAmp;    // r = idxPrice / idxPrev
     ctx.save(); ctx.beginPath(); ctx.rect(P.l, P.t, cw, ch); ctx.clip();
     ctx.beginPath();
     _idxPacked.forEach((o, i) => {
@@ -2773,16 +2813,15 @@ function drawTrend(cv, tr, item, idxTr) {
     ctx.shadowColor = 'rgba(75,139,245,.45)'; ctx.shadowBlur = 5;
     ctx.stroke();
     ctx.restore();
-    // 右端标注真实涨跌幅：独立坐标下位置不能逐点比，但方向与幅度仍可读
+    // 标签固定放绘图区左上角：旧版贴在线尾，正好把最后一段蓝线盖住
     const _lastR = +_idxPacked[_idxPacked.length - 1].p.price / _iprev;
-    const _ly = Math.max(P.t + 9, Math.min(P.t + ch - 9, yIdx(_lastR)));
     const _lt = '上证 ' + (_lastR >= 1 ? '+' : '') + ((_lastR - 1) * 100).toFixed(2) + '%';
-    ctx.font = sansF(9.5); ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.font = sansF(9.5); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     const _lw = ctx.measureText(_lt).width;
-    ctx.fillStyle = 'rgba(75,139,245,.18)';
-    ctx.fillRect(P.l + cw - _lw - 8, _ly - 15, _lw + 8, 13);
+    ctx.fillStyle = 'rgba(7,10,17,.78)';
+    ctx.fillRect(P.l + 3, P.t + 2, _lw + 9, 15);
     ctx.fillStyle = '#8DBAFF';
-    ctx.fillText(_lt, P.l + cw - 4, _ly - 3);
+    ctx.fillText(_lt, P.l + 7.5, P.t + 5);
   }
   ctx.beginPath(); ctx.arc(xEnd, y(lastP), 2.6, 0, Math.PI * 2);
   ctx.fillStyle = col; ctx.fill();
@@ -3463,7 +3502,7 @@ function startLive(item, market) {
   state.liveTimer = setInterval(() => liveTick(item, market), CHART.sec * 1000);
 }
 
-/* 安卓壳在 onPause / onResume 时调用：切到后台就彻底停掉定时器，
+/* 原生壳（iOS SceneDelegate）在回前台 / 切后台时调用：切到后台就彻底停掉定时器，
    模拟器里定时器空转会白烧 CPU，也容易把内存顶到被系统杀掉。 */
 window.__appPause = function () {
   state.paused = true; state.pausedAt = Date.now();
@@ -3471,7 +3510,7 @@ window.__appPause = function () {
 };
 window.__appResume = function () {
   state.paused = false;
-  health();                       // 回到前台先同步休市/开盘状态，自动重扫据此恢复或暂停
+  healService();                  // 回到前台先自愈链路，再同步休市/开盘状态
   if (state.liveItem) {
     // 按回前台时的市场状态重建对应速率，再立刻补刷一拍
     if (autoMarketState() === 'open') startLive(state.liveItem, state.liveMarket);
@@ -3873,7 +3912,7 @@ function renderDetailPane(item, d) {
     }
   }
   body.innerHTML = `<canvas id="cv"></canvas>
-    <div class="legend">${state.dtab === 'intra' ? '<span><i style="background:#F04B4E"></i>价格</span>' : ''}<span><i style="background:#E9B949"></i>${state.dtab === 'intra' ? '分时均价线（VWAP）' : 'MA5 / MA10 / MA20'}</span>${(state.dtab === 'intra' && d && d.idx_trends && d.idx_trends.points && d.idx_trends.points.length >= 20) ? `<span><i style="background:#4B8BF5"></i>上证指数（独立振幅）</span>` : ''}${
+    <div class="legend">${state.dtab === 'intra' ? '<span><i style="background:#F04B4E"></i>价格</span>' : ''}<span><i style="background:#E9B949"></i>${state.dtab === 'intra' ? '分时均价线（VWAP）' : 'MA5 / MA10 / MA20'}</span>${(state.dtab === 'intra' && d && d.idx_trends && d.idx_trends.points && d.idx_trends.points.length >= 20) ? `<span><i style="background:#4B8BF5"></i>上证指数（与昨收同基准）</span>` : ''}${
       state.dtab === 'daily'
         ? `<span><i style="background:#F04B4E"></i>获利筹码</span><span><i style="background:#4B8BF5"></i>套牢筹码</span><span><i style="background:#F07578"></i>压力位</span><span><i style="background:#4ADE80"></i>支撑位</span><span><i style="background:#FFB020"></i>止盈位</span><span><i style="background:#38BDF8"></i>止损位</span><span style="color:#5F6B80">按最新价 ${numOrDash(px, 2)} 实时计算${plan && plan.backend ? ' · 后端口径' : ' · 按现价估算'}</span>`
         : (state.dtab === 'intra' ? `<span style="color:${d.trends?.live ? '#7FC8A4' : '#E9B949'}">${esc(d.trends?.fresh_note || '分时数据')}</span>` : '')}${chartStatusNote() ? `<span style="color:#5F6B80">${chartStatusNote()}</span>` : ''}</div>
@@ -4930,7 +4969,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   // v1.5.17：PC 回前台与安卓 __appResume 对齐，先同步市场状态并补刷详情图，
   // 再跑自动重扫；否则跨开盘/收盘时最多滞后一个 20 秒 health 周期。
-  health();
+  // v1.7.0：改用 healService —— 唤醒后链路可能已断，要重试几次而不是只打一拍。
+  healService();
   if (state.liveItem) liveTick(state.liveItem, state.liveMarket);
   autoTick();
 });
@@ -6198,6 +6238,7 @@ $$('.tab').forEach(t => {
     $$('.tab').forEach(x => x.classList.remove('on'));
     t.classList.add('on');
     state.view = t.dataset.view;
+    try { localStorage.setItem('yb_view', state.view); } catch (e) {}   // 整页重载后回到原板块
     placeSearch(state.view);
     // A/B/C 筛选只在一夜持股工具栏可见，切走就把残留等级清掉，
     // 免得回到一夜持股时莫名其妙少一批票
@@ -6229,7 +6270,13 @@ placeSearch(state.view);
 /* ------------------ 深链 ------------------ */
 (function () {
   const v = new URLSearchParams(location.search).get('view');
-  if (v) setTimeout(() => { const t = $$('.tab').find(x => x.dataset.view === v); if (t) t.click(); }, 80);
+  if (v) { setTimeout(() => { const t = $$('.tab').find(x => x.dataset.view === v); if (t) t.click(); }, 80); return; }
+  // v1.7.0：没带 view 参数时（唤醒自愈导致的整页重载）回到上次看的板块
+  let last = '';
+  try { last = localStorage.getItem('yb_view') || ''; } catch (e) {}
+  if (last && last !== 'scan') {
+    setTimeout(() => { const t = $$('.tab').find(x => x.dataset.view === last); if (t) t.click(); }, 80);
+  }
 })();
 
 /* ------------------ 手机端：筛选条件可折叠 ------------------ */

@@ -1,6 +1,6 @@
 # iOS 方案 B · 完整移植工程
 
-把**安卓端已有的整套系统**（`app.py` + `web/index.html`）原样搬到 iOS，**不重写任何业务逻辑、不从头构建**。iOS 端只做一层薄壳：初始化 Python → 起本地服务 → WKWebView 加载，和安卓的 `MainActivity` + `android_boot.py` 架构一一对应。
+把**桌面版已有的整套系统**（`app.py` + `web/index.html`）原样搬到 iOS，**不重写任何业务逻辑、不从头构建**。iOS 端只做一层薄壳：初始化 Python → 起本地服务 → WKWebView 加载。（安卓端已于 v1.7.0 下线，只保留 PC 与 iOS 两端。）
 
 **进度**：✅ 最小验证（CPython + WebView）已真机跑通；✅ 完整移植代码已完成、本地行为验证通过；⏳ 等你云编译 + 真机验证抓数据。
 
@@ -8,16 +8,16 @@
 
 ## 一、原理（为什么能成）
 
-- iOS 不能像安卓用 Chaquopy，但可以把 CPython 编译成 `Python.xcframework` 嵌进 App。BeeWare 的 `Python-Apple-support` 提供**预编译好的** iOS 版（3.11/3.11+，iOS 13+），不用自己交叉编译。
+- iOS 不能像 Android 那样靠桥接直接把 Python 打进 App，但可以把 CPython 编译成 `Python.xcframework` 嵌进 App。BeeWare 的 `Python-Apple-support` 提供**预编译好的** iOS 版（3.11/3.11+，iOS 13+），不用自己交叉编译。
 - 基于官方 `testbed` 工程改造：stdlib 打包、搜索路径、`install_python` 构建脚本都由它处理好了。
-- 业务逻辑与安卓**同源同码**：`app.py` 和 `web/index.html` 逐字节复制自桌面版（和安卓 `sync_assets.py` 的同步来源一致）。移动端差异全部收敛在启动垫片里：
+- 业务逻辑与桌面版**同源同码**：`app.py` 和 `web/index.html` 逐字节复制自桌面版。移动端差异全部收敛在启动垫片里：
 
 | 平台 | 原生壳 | 启动垫片 | 业务本体 |
 |---|---|---|---|
-| 安卓 | `MainActivity.java` | `android_boot.py` | `app.py` + `web/` |
+| PC | 无（直接 `python app.py`） | 无 | `app.py` + `web/` |
 | iOS | `SceneDelegate.m` | `ios_boot.py` | `app.py` + `web/`（完全复用） |
 
-`ios_boot.py` 与 `android_boot.py` 逻辑一一对应：设 `NO_BROWSER`/`NIGHT_LIGHT`、装 SSL 证书兜底、切到可写目录、起 `ThreadingHTTPServer`、回传端口。唯一差别是 iOS 的 bundle 只读，需先把 `app.py`/`web/` 复制到沙盒 `Documents/runtime`。
+`ios_boot.py` 负责设 `NO_BROWSER`/`NIGHT_LIGHT`、装 SSL 证书兜底、切到可写目录、起 `ThreadingHTTPServer`、回传端口；`ensure()` 供回前台时保活，会真连一次 `/api/health` 再决定是否重启。与桌面版的唯一差别是 iOS 的 bundle 只读，需先把 `app.py`/`web/` 复制到沙盒 `Documents/runtime`。
 
 ---
 
@@ -27,14 +27,14 @@
 |---|---|
 | `app_source/app.py` | 业务本体（复制自桌面版，逐字节一致） |
 | `app_source/web/index.html` | 前端页面（复制自桌面版，逐字节一致） |
-| `assets/AppIcon-1024.png` | App 图标（安卓 ic_launcher 放大到 1024×1024、深色底不透明） |
-| `overrides/ios_boot.py` | 启动垫片（对应安卓 `android_boot.py`） |
+| `assets/AppIcon-1024.png` | App 图标（桌面 `icon.png` 放大到 1024×1024、深色底不透明） |
+| `overrides/ios_boot.py` | 启动垫片：起服务、`ensure()` 唤醒保活 |
 | `overrides/SceneDelegate.m` | 原生壳：初始化 Python + 起服务 + WKWebView 铺满全屏 + 失败提示/重试 |
 | `patch_project.py` | CI 里给官方 testbed 打补丁（覆盖壳、放置运行文件、注入 ATS、改 App 名为「股票筛选系统」、装图标） |
 | `ios-upload.zip` | 本目录完整打包，直接解压覆盖上传到 GitHub 仓库即可 |
 | `.github/workflows/build.yml` | 云编译：下载 Python 包→打补丁→archive→打包 ipa→上传 |
 
-**现有 exe/apk 项目一行没动。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.6.9）。App 显示名「股票筛选系统」、图标与安卓端一致。
+**PC 端一行没动。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.7.0）。App 显示名「股票筛选系统」、图标与 PC 端一致。
 
 ---
 
@@ -77,7 +77,7 @@ ios-poc/
 
 ### 第 4 步：验证（关键）
 
-1. 启动页会先显示 **"股票筛选系统 iOS v1.6.9 · 正在启动…"**，随后进入完整功能界面。如果还是 "Python on iOS OK"，说明装的仍是旧 POC 包，需要重新编译 + 侧载。
+1. 启动页会先显示 **"股票筛选系统 iOS v1.7.0 · 正在启动…"**，随后进入完整功能界面。如果还是 "Python on iOS OK"，说明装的仍是旧 POC 包，需要重新编译 + 侧载。
 2. 跑一次"一夜持股"扫描，**确认能抓到行情数据**（有票、有分数）。这一步验证 iOS 版 Python 的 https 能否正常访问行情接口。
 3. 若有数据 → 大功告成；若扫描报"数据源失败/全是 0"，多半是 SSL 证书问题，把现象发我，我调整证书兜底（安卓已有同款处理，可控）。
 
@@ -86,13 +86,13 @@ ios-poc/
 ## 四、已做的验证
 
 - ✅ POC 真机跑通（CPython 解释器 + socket + WKWebView 三件套成立）。
-- ✅ `ios_boot.py` 本地行为验证：资源复制正确、二次同步不重写、`start()` 能起真实服务、`/api/health` 返回 `1.6.9`、首页返回完整前端。
+- ✅ `ios_boot.py` 本地行为验证：资源复制正确、二次同步不重写、`start()` 能起真实服务、`/api/health` 返回 `1.7.0`、首页返回完整前端。
 - ✅ `patch_project.py` 端到端模拟：文件到位、ATS 注入、ObjC 引用一致。
 - ✅ Python/YAML 语法检查全过。
 
-### 安卓 → iOS 移植安全性审查（逐项）
+### 桌面版 → iOS 移植安全性审查（逐项）
 
-指标算法本身**不会**因为换平台而改变：iOS 与安卓跑的是**同一份 `app.py`**（逐字节一致），MA、量比、涨幅、换手、分时均价线、跑赢上证比例等全是纯 Python 数学，arm64 两端浮点都是 IEEE 754 double，结果一致。
+指标算法本身**不会**因为换平台而改变：iOS 与 PC 跑的是**同一份 `app.py`**（逐字节一致），MA、量比、涨幅、换手、分时均价线、跑赢上证比例等全是纯 Python 数学，arm64 两端浮点都是 IEEE 754 double，结果一致。
 
 真正需要关注的是「平台能力差异」，逐项核对结果：
 
@@ -104,7 +104,7 @@ ios-poc/
 | `subprocess` / `fork` / `multiprocessing` | **0 处**，iOS 禁进程派生不影响 |
 | `webbrowser` / 打开浏览器 | 仅 `main()` 内调用，iOS 走 `import app` 不执行 `main`，且 `NO_BROWSER=1` |
 | `print` / stderr 日志 | `Handler.log_message` 已重写为空操作；`print` 只在 `main()` |
-| 并发 / 内存 | `NIGHT_LIGHT=1` 生效，CPU 密集线程压到 4、网络等待压到 8，与安卓同档 |
+| 并发 / 内存 | `NIGHT_LIGHT=1` 生效，CPU 密集线程压到 4、网络等待压到 8 |
 | HTTPS / CA 证书 | 有 certifi 用它，没有则退化为不校验（只访问公开行情、不传凭据）；`http.client` 与 `urllib` 都走该 context |
 | 未捕获异常 | 新增 `crash.log`（主线程 + 子线程），新增 `startup.log`（Python/OpenSSL/证书/时区） |
 
@@ -113,8 +113,9 @@ ios-poc/
 ## 五、已知限制
 
 - **后台会被挂起**：iOS 切后台后 socket 被系统暂停，扫描时保持前台（自用可接受）。
-  v1.6.8 起回前台会自动自检（1.6.9 沿用）：页面 DOM 或本地服务任一失效，就自动重启服务并重新加载页面，
-  不再出现锁屏唤醒后整屏黑掉的情况（代价是页面会重新加载，之前的扫描结果需要重跑）。
+  v1.7.0 起回前台按四层自愈：调页面 `__appResume` 补心跳 → 在 WebView 里真发 `fetch /api/health`
+  → 不通就先无缓存重载页面 → 仍不通才重启 Python 服务（`ensure()` 真探活，能识别半死 socket）。
+  黑屏和「服务异常」都会自动恢复，不需要手动重启 App（代价是页面可能重新加载，之前的扫描结果需重跑）。
 - **数据独立**：iOS 版数据存在 App 沙盒 `Documents/runtime`，与电脑/安卓各自独立，不互通。
 - **签名有效期**：免费 Apple ID 7 天，到期用 Sideloadly 重签，不用重新编译。
 - **SSL 证书**：iOS 版 CPython 的 CA 根证书情况需真机确认；代码已做兜底（有 certifi 用 certifi，无则退化为不校验，仅访问公开行情接口、不传凭据）。

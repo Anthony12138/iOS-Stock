@@ -39,11 +39,11 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.6.9"
+VERSION = "1.7.0"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
-# 手机 / 模拟器上跑时 android_boot 会设这个变量：并发线程砍到 4，
+# 手机端（iOS 的 ios_boot 启动时）会把 NIGHT_LIGHT 设成 1：并发线程砍到 4，
 # 解释执行环境下线程越多越慢，内存也越高（每线程一份栈 + 缓冲）。
 LIGHT = bool(os.environ.get("NIGHT_LIGHT"))
 
@@ -6050,7 +6050,7 @@ def _name_base():
 # ------------------------------------------------------------ v1.5.14 情绪面谐音
 # 「当炒字」不再要求字面相同：同音字（羊/阳/洋）算完整命中，
 # 近音字（平翘舌、前后鼻音）算半分命中。读音表在构建时用 pypinyin 生成后固化，
-# 运行期不依赖任何第三方拼音库，PC 的 PyInstaller 包与安卓 Chaquopy 都能直接用。
+# 运行期不依赖任何第三方拼音库，PC 的 PyInstaller 包与 iOS 内嵌解释器都能直接用。
 # 音节 -> 同音字串（忽略声调，每字只按主读音归组）
 _SYLLABLE_CHARS = {
     'a': '啊嗄锕阿',
@@ -6798,18 +6798,36 @@ def _ld_pctile(v, arr):
     return sum(1 for a in arr if a <= v) / len(arr)
 
 
+LD_PUSH_HOSTS = ("push2.eastmoney.com", "82.push2.eastmoney.com", "push2delay.eastmoney.com")
+
+
+def _ld_push_get(q, timeout=6):
+    """东财 push2 系列接口的多域名兜底。
+
+    2026-11 实测：连续请求后单个域名会直接返回 RemoteDisconnected（不发响应），
+    换一个镜像域名往往立刻可用；全部失败才把最后一个异常抛给上层。
+    """
+    last = None
+    for h in LD_PUSH_HOSTS:
+        try:
+            return http_json("https://" + h + q, timeout=timeout, retries=1) or {}
+        except Exception as e:
+            last = e
+    raise last if last is not None else RuntimeError("push2 unavailable")
+
+
 def _ld_board_page(t, pz=100):
     """行业(t=2) / 概念(t=3) 板块榜，按主力净额降序。"""
-    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=%d&po=1&np=1&fltt=2"
-           "&invt=2&fid=f62&fs=m:90+t:%d&fields=%s" % (pz, t, LD_BF))
-    return (http_json(url, timeout=8, retries=2) or {}).get("data") or {}
+    q = ("/api/qt/clist/get?pn=1&pz=%d&po=1&np=1&fltt=2"
+         "&invt=2&fid=f62&fs=m:90+t:%d&fields=%s" % (pz, t, LD_BF))
+    return (_ld_push_get(q) or {}).get("data") or {}
 
 
 def _ld_members(bk):
-    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2"
-           "&invt=2&fid=f62&fs=b:%s&fields=f2,f3,f6,f8,f10,f12,f13,f14,f21,f62"
-           % urllib.parse.quote(str(bk)))
-    return ((http_json(url, timeout=8, retries=2) or {}).get("data") or {}).get("diff") or []
+    q = ("/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2"
+         "&invt=2&fid=f62&fs=b:%s&fields=f2,f3,f6,f8,f10,f12,f13,f14,f21,f62"
+         % urllib.parse.quote(str(bk)))
+    return ((_ld_push_get(q) or {}).get("data") or {}).get("diff") or []
 
 
 def _ld_hot(c, b):
@@ -6901,11 +6919,12 @@ def leader_analysis(params):
         except Exception:
             pass
 
-        scanned, inflow, raw = 0, 0, []
+        scanned, inflow, raw, board_err = 0, 0, [], 0
         for src_name, t in (("行业", 2), ("概念", 3)):
             try:
                 page = _ld_board_page(t)
             except Exception:
+                board_err += 1
                 continue
             scanned += int(page.get("total") or 0)
             for x in (page.get("diff") or []):
@@ -6945,10 +6964,13 @@ def leader_analysis(params):
             if len(cand) >= LD_CAND_MAX:
                 break
 
+        berr = [0]
+
         def one(c):
             try:
                 return _ld_build_board(c, zmap)
             except Exception:
+                berr[0] += 1
                 return None
 
         built = []
@@ -6991,7 +7013,9 @@ def leader_analysis(params):
                 "market": market_status(), "scanned": scanned, "inflow": inflow,
                 "covered": covered, "elapsed": round(time.time() - t0, 1),
                 "list": picks, "params": p,
-                "empty": "" if picks else "当前没有资金净流入且成交额达标的板块，等放量后再试"}
+                "empty": "" if picks else (
+                    "板块资金榜接口（东财）暂时无响应，稍后会自动重试"
+                    if board_err >= 2 else "当前没有资金净流入且成交额达标的板块，等放量后再试")}
 
     key = "leader:%d:%d" % (p["boards"], p["follow"])
     try:
