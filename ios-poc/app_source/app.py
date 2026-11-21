@@ -766,8 +766,16 @@ def force_begin(token):
         if _FORCE_BATCH["token"] == token:
             return False
         _FORCE_BATCH["token"] = token
-    with _cache_lock:
-        _cache.clear()
+        # v1.7.5 修复：先等所有在途单飞 owner 结束，再清缓存。否则自动重扫正持有
+        # snapshot/K线 的 in-flight owner 时点「开始扫描」，force 请求会在 cached()
+        # 里搭到 force 之前的旧结果，且旧 owner 会把旧值写回刚清空的缓存，force 等于失效
+        # （v1.6.5 同类问题）。等待与清缓存同在 _FORCE_LOCK 内，保证「认 token + 清缓存」原子。
+        with _cache_lock:
+            _events = list(_inflight.values())
+        for _ev in _events:
+            _ev.wait(60)
+        with _cache_lock:
+            _cache.clear()
     return True
 
 
@@ -7422,7 +7430,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.exists(fp):
                     return self._send(500, "缺少 web/index.html", "text/plain; charset=utf-8")
                 with open(fp, "rb") as f:
-                    return self._send(200, f.read(), "text/html; charset=utf-8")
+                    html = f.read()
+                if LIGHT:
+                    # v1.7.5：iOS 专属样式走 html.ios-native，PC 端原样输出、零影响。
+                    # 同一份 web/index.html 逐字节同步，靠这里注入标记区分两端，无首屏闪烁。
+                    html = html.replace(b'<html lang="zh-CN">',
+                                        b'<html lang="zh-CN" class="ios-native">', 1)
+                    html = html.replace(b'content="#070A11"', b'content="#000000"', 1)
+                return self._send(200, html, "text/html; charset=utf-8")
 
             if path == "/api/health":
                 note_beat()   # v1.7.3：心跳刷新活跃时间，取消待执行的自动退出

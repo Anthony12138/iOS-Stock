@@ -1081,6 +1081,29 @@
       background:rgba(255,255,255,.025);color:var(--muted);
     }
   }
+  /* ===== v1.7.5 iOS 专属：仅当后端 LIGHT=1 时给 <html> 注入 .ios-native，PC 端原样输出、零影响 ===== */
+  /* 背景 + 操作面板 + 所有卡片纯黑（OLED 省电）；S/A 级金框保留并加光晕 */
+  html.ios-native{--bg:#000000;--bg2:#000000;--panel:#000000;--panel2:#000000;--panel3:#000000}
+  html.ios-native body{background:#000000}                    /* 盖掉 body 的两层径向渐变光晕 */
+  html.ios-native header{background:rgba(0,0,0,.92)}          /* 顶栏纯黑 */
+  /* 评分卡 / 龙头卡背景是硬编码渐变，变量盖不到，单独覆盖成纯黑 */
+  html.ios-native .ai-card,html.ios-native .lt-card{background:#000000}
+  /* S/A 级金框保留（.ai-card.top3 由 goldCls 只给 S/A）+ 金色光晕；普通卡片仍是普通细框 */
+  html.ios-native .ai-card.top3{
+    background:#000000;border-color:rgba(233,185,73,.6);
+    box-shadow:0 0 0 1px rgba(233,185,73,.22),0 0 14px rgba(233,185,73,.28)
+  }
+  /* 龙头分析前三仍按名次加金框，同样保留光晕 */
+  html.ios-native .lt-card.top{
+    background:#000000;border-color:rgba(233,185,73,.55);
+    box-shadow:0 0 0 1px rgba(233,185,73,.2),0 0 12px rgba(233,185,73,.25)
+  }
+  /* AI 多日持股开关：占满整列 + 加边框，外观与一夜持股 .scan-sw 一致（覆盖内联样式） */
+  html.ios-native #aiSwingToggleRow{
+    display:flex!important;width:100%!important;max-width:100%!important;box-sizing:border-box!important;
+    background:var(--bg2)!important;border:1px solid var(--line)!important;
+    border-radius:9px!important;padding:9px 12px!important;
+  }
 </style>
 </head>
 <body>
@@ -2014,7 +2037,9 @@ function syncRefreshBtn() {
   const r = $('#btnRefresh');
   if (!r) return;
   const noScanView = state.view === 'review' || state.view === 'strategy';
-  const busy = state.scanning || state.aiLoading || state.ztdLoading || state.dtdLoading || state.ldLoading;
+  // v1.7.5 修复：全板块扫描(runAll)串行执行、板块间隙各 loading 都为 false 时，
+  // 也必须保持刷新键禁用，否则切板块会误启用，点刷新与 runAll 撞车导致某板块被跳过仍报「已完成」。
+  const busy = scanAllRunning || state.scanning || state.aiLoading || state.ztdLoading || state.dtdLoading || state.ldLoading;
   r.disabled = noScanView || busy;
 }
 
@@ -6450,7 +6475,7 @@ async function runAll(force) {
   scanAllRunning = true;
   lockScanBtns(true);
   // v1.7.5：每批强制扫描生成唯一 token，后端首次见到就清缓存令五板块重拉数据源；
-  // 不传 force（冷启动/自动补扫）则走缓存，与旧行为一致。
+  // force=false 仅为兼容旧调用保留；冷启动与「开始扫描」都传 true 强制拉取。
   const forceToken = force ? ('f' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)) : '';
   // v1.7.4：全板块扫描接取消控制器，并把「取消本次扫描」按钮显示出来。
   // 五个板块都以静默模式跑（各自不碰遮罩/按钮），由这里统一接一个 signal。
@@ -6495,6 +6520,7 @@ $('#btnScan').title = '强制从数据源拉取并刷新五个板块（一夜持
 /* 刷新键：用热缓存只刷当前板块。股票搜索/战法规则无扫描动作，直接提示。
    一夜持股走 fast=1 只读缓存换算（秒出，和宽松开关切换同一套）；其余板块重新请求即命中各自缓存。 */
 async function refreshCurrent() {
+  if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
   if (state.view === 'review' || state.view === 'strategy') {
     toast('当前板块无需刷新', 1600);
     return;
