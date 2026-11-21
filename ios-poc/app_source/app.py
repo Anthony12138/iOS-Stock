@@ -83,6 +83,9 @@ HOLIDAYS = set()                 # 当前生效集合；is_holiday / market_stat
 _hol_mtime = [None]              # 文件修改时间，用来做热加载
 _hol_lock = threading.RLock()      # 可重入：load_holidays 持锁时会再调 _hol_write
 _hol_net_lock = threading.Lock()
+# v1.7.5：跨年自动刷新每年只触发一次建线程，避免 is_holiday 高频调用时线程风暴
+_hol_trigger_lock = threading.Lock()
+_HOL_CROSSYEAR = {"year": None}
 _hol_state = {
     "year": 0, "source": "builtin", "updated_at": "", "manual": False,
     "auto": True, "last_error": "", "checking": False,
@@ -402,7 +405,15 @@ def is_holiday(d=None):
     # v1.6.5：改后台线程执行——is_holiday 被每个响应/卡片高频调用，同步联网会
     # 阻塞首批请求数秒~数十秒。非阻塞锁自保，重复触发不会叠加网络请求。
     try:
-        if _hol_state.get("year") != now_cn().year:
+        year = now_cn().year
+        # v1.7.5：is_holiday 被每个响应/卡片高频调用，跨年刷新失败时旧代码每次都新建线程。
+        # 用「年」做一次性令牌：同一年只触发一次；后台每小时的 auto 循环仍会继续重试。
+        fire = False
+        with _hol_trigger_lock:
+            if _hol_state.get("year") != year and _HOL_CROSSYEAR["year"] != year:
+                _HOL_CROSSYEAR["year"] = year
+                fire = True
+        if fire:
             t = threading.Thread(target=refresh_holidays, daemon=True, name="holiday-crossyear")
             t.start()
     except Exception:
@@ -672,6 +683,9 @@ def src_fail(name, seconds=90):
 
 _inflight = {}
 _CACHE_MAX = 3000
+# v1.7.5：缓存代数。force 时换代而不是在锁内等旧 owner：旧单飞用 (旧代,key)
+# 登记，新请求用 (新代,key) 自己重拉；旧 owner 完成时因代数不符不会写回缓存。
+_CACHE_GEN = 0
 
 
 def cached(key, ttl, producer):
@@ -684,30 +698,34 @@ def cached(key, ttl, producer):
     while True:
         now = time.time()
         with _cache_lock:
+            gen = _CACHE_GEN
+            ikey = (gen, key)             # 换代后旧 owner 不再阻塞新请求
             hit = _cache.get(key)
             if hit and now - hit[0] < ttl:
                 return hit[1]
-            ev = _inflight.get(key)
+            ev = _inflight.get(ikey)
             owner = ev is None
             if owner:
                 ev = threading.Event()
                 ev.result = None          # owner 完成后填 (ok, val_or_exc)
-                _inflight[key] = ev
+                _inflight[ikey] = ev
         if owner:
             ok = False
             try:
                 val = producer()
                 with _cache_lock:
-                    _cache[key] = (time.time(), val)
-                    if len(_cache) > _CACHE_MAX:
-                        for k in sorted(_cache, key=lambda k: _cache[k][0])[:_CACHE_MAX // 5]:
-                            _cache.pop(k, None)
+                    # force 换代后，旧 owner 的过期结果绝不写回新缓存（否则 force 失效）
+                    if gen == _CACHE_GEN:
+                        _cache[key] = (time.time(), val)
+                        if len(_cache) > _CACHE_MAX:
+                            for k in sorted(_cache, key=lambda k: _cache[k][0])[:_CACHE_MAX // 5]:
+                                _cache.pop(k, None)
                 ok = True
                 ev.result = (True, val)
                 return val
             except BaseException as ex:
                 with _cache_lock:
-                    if not ok:
+                    if not ok and gen == _CACHE_GEN:
                         stale = _cache.get(key)
                         if stale and time.time() - stale[0] >= ttl:
                             _cache.pop(key, None)
@@ -717,12 +735,14 @@ def cached(key, ttl, producer):
                 # 必须在 finally 里唤醒等待者，且只摘掉「自己注册的那个」Event，
                 # 避免极端超时被接管后误删新 owner 的单飞标记。
                 with _cache_lock:
-                    if _inflight.get(key) is ev:
-                        _inflight.pop(key, None)
+                    if _inflight.get(ikey) is ev:
+                        _inflight.pop(ikey, None)
                 ev.set()
-        # 等待者：owner 完成会 set 唤醒；卡死时每 45s 复核一次，若 owner 已消失则接管
+        # 等待者：owner 完成会 set 唤醒；换代被唤醒时 gen 已变，重走循环用新代自己拉
         ev.wait(45)
         with _cache_lock:
+            if gen != _CACHE_GEN:
+                continue
             hit = _cache.get(key)
             if hit and time.time() - hit[0] < ttl:
                 return hit[1]
@@ -748,9 +768,31 @@ def cache_peek(key, max_age):
         return val
 
 
-# v1.7.5：「开始扫描」强制从数据源全量拉取——用一次性 token 清缓存实现。
+def _bump_cache_generation(prefix=None):
+    """缓存换代：认账后立刻生效，不等在途 owner。
+    - 旧单飞登记在 (旧代,key) 下，新请求用 (新代,key) 自己重拉，不搭旧结果；
+    - 旧 owner 完成时代数不符，结果不写回缓存；
+    - 唤醒所有旧等待者，它们复核到代数变化会重走循环。
+    prefix 非 None 时只清该前缀的缓存项（快照专用），否则清全部。
+    ev.set() 放在锁外，避免唤醒的线程立刻回抢锁形成锁内等锁。"""
+    global _CACHE_GEN
+    with _cache_lock:
+        _CACHE_GEN += 1
+        if prefix is None:
+            _cache.clear()
+        else:
+            for k in list(_cache):
+                if k.startswith(prefix):
+                    _cache.pop(k, None)
+        stale = list(_inflight.values())
+    for ev in stale:
+        ev.set()
+    return _CACHE_GEN
+
+
+# v1.7.5：「开始扫描」强制从数据源全量拉取——用一次性 token 换代实现。
 # 为什么不用线程标志：真正取数（逐票日K/分时）在 ThreadPoolExecutor 子线程里调用 cached()，
-# threading.local 传不进去。改为「前端整批扫描带同一个 token，后端首次见到就清空全部缓存」，
+# threading.local 传不进去。改为「前端整批扫描带同一个 token，后端首次见到就换代并清缓存」，
 # 之后同批次的其余板块请求自然 miss 重拉并写回最新值；不用改任何业务函数签名。
 _FORCE_BATCH = {"token": None}
 _FORCE_LOCK = threading.Lock()
@@ -758,24 +800,17 @@ _FORCE_LOCK = threading.Lock()
 
 def force_begin(token):
     """一次强制全量扫描开始时调用。token 由前端为每批生成（时间戳），
-    同一 token 只清一次缓存——五个板块里第一个请求清，其余四个共享刚重拉的数据，
-    避免重复清空导致五个板块各自重拉同一份快照。返回是否是本次批次的首个请求。"""
+    同一 token 只换代一次——五个板块里第一个请求换代，其余四个共享刚重拉的数据，
+    避免重复换代导致五个板块各自重拉同一份快照。返回是否是本次批次的首个请求。
+    v1.7.5 修复：不再在 _FORCE_LOCK 内等待最多 60s×N 的在途单飞（多标签并发会串行
+    阻塞整个后端），改由缓存代数 + 单飞 key 换代保证旧结果写不回新缓存。"""
     if not token:
         return False
     with _FORCE_LOCK:
         if _FORCE_BATCH["token"] == token:
             return False
         _FORCE_BATCH["token"] = token
-        # v1.7.5 修复：先等所有在途单飞 owner 结束，再清缓存。否则自动重扫正持有
-        # snapshot/K线 的 in-flight owner 时点「开始扫描」，force 请求会在 cached()
-        # 里搭到 force 之前的旧结果，且旧 owner 会把旧值写回刚清空的缓存，force 等于失效
-        # （v1.6.5 同类问题）。等待与清缓存同在 _FORCE_LOCK 内，保证「认 token + 清缓存」原子。
-        with _cache_lock:
-            _events = list(_inflight.values())
-        for _ev in _events:
-            _ev.wait(60)
-        with _cache_lock:
-            _cache.clear()
+        _bump_cache_generation()
     return True
 
 
@@ -1015,16 +1050,9 @@ def fetch_snapshot(force=False):
                 "data_date": ""}
 
     if force:
-        # 先等正在进行的单飞 owner 结束，再清缓存，避免 force 请求搭 owner 的
-        # 旧结果（v1.6.5）：否则手动刷新与自动重扫重叠时 force 等于无效。
-        with _cache_lock:
-            _ev = _inflight.get("snapshot")
-        if _ev is not None:
-            _ev.wait(60)
-        with _cache_lock:
-            for k in list(_cache):
-                if k.startswith("snapshot"):
-                    _cache.pop(k, None)
+        # v1.7.5：换代代替「等旧 owner 结束再清缓存」。旧单飞结果写不回新缓存，
+        # 新请求用新代 key 自己重拉，手动刷新与自动重扫重叠时 force 不再失效。
+        _bump_cache_generation("snapshot")
     return cached("snapshot", 25, build)
 
 
@@ -5459,9 +5487,10 @@ def is_bad_name(name, exclude_st):
 
 def scan(params, fast=False):
     """一夜持股扫描。fast=True 为「缓存快速换算」：只用已缓存的日K/分时重算，
-    全程不额外联网，1~3 秒出榜单，供宽松模式开关切换那一刻秒出结果；
-    结果标注 fast/partial，前端随后自动跑一次完整口径复核来替换。
-    缓存命中太少返回 insufficient=True，由前端直接走完整扫描。"""
+    全程不额外联网，1~3 秒出榜单，供「刷新」键与宽松模式开关切换那一刻秒出结果；
+    评分/硬门槛调用与完整扫描完全相同的 evaluate()，不再承诺「随后完整复核」——
+    用户要快时就用已拉到的数据按同一标准筛，不重扫。未命中缓存的候选本次不参与。
+    缓存命中太少返回 insufficient=True，由前端提示先跑一次完整扫描。"""
     t0 = time.time()
     p = dict(DEFAULTS)
     for k, v in (params or {}).items():
@@ -5548,7 +5577,7 @@ def scan(params, fast=False):
     def work(q):
         try:
             if fast:
-                # 只读缓存、绝不联网：没有日K或分时缓存的票跳过，交给「完整复核」补上
+                # 只读缓存、绝不联网：没有日K或分时缓存的票本次不参与（不重扫补数据）
                 bars = cache_peek(f"k:{q['market']}:{q['code']}", FAST_KLINE_MAX_AGE)
                 if not bars or len(bars) < 25:
                     return ("__miss__",)
@@ -5586,11 +5615,12 @@ def scan(params, fast=False):
             else:
                 results.append(r)
 
-    # v1.7.3 fast：缓存命中太少（刚启动 / 缓存过期 / 换了参数候选池变了）就不拿
-    # 子集冒充榜单，返回 insufficient 让前端直接走完整扫描。
+    # v1.7.5：只要缓存里还有可用数据就按完整评分标准出榜单，不再因命中率低于 25%
+    # 强制走完整重扫（用户要的就是「用已拉到的数据快筛」）。仅当几乎没有缓存时
+    # 返回 insufficient，提示先点「开始扫描」拉一次。
     if fast:
         cache_hit = len(results)
-        if cache_hit < 3 or (cand and cache_hit < len(cand) * 0.25):
+        if cache_hit < 3:
             return {
                 "ok": True, "mode": "scan", "fast": True, "insufficient": True,
                 "cache_hit": cache_hit, "cache_pool": len(cand),
@@ -5598,7 +5628,7 @@ def scan(params, fast=False):
                 "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
                 "market": market_status(), "params": p,
                 "funnel": funnel, "list": [], "elapsed": round(time.time() - t0, 1),
-                "note": "缓存不足，直接按完整口径扫描。",
+                "note": "本地缓存不足，请先点「开始扫描」拉取完整数据。",
             }
 
     # 数据大面积缺失（过半候选因分时/上证缺失被拦）：数据源故障，整批空 + 明确提醒，
@@ -5653,8 +5683,8 @@ def scan(params, fast=False):
     if fast:
         _fast_meta = {
             "fast": True, "partial": True, "cache_hit": len(results), "cache_pool": len(cand),
-            "note": f"快速换算：用上次扫描已缓存的日K/分时（命中 {len(results)}/{len(cand)} 只）按同一口径重算，"
-                    "未额外联网，完整口径复核随后自动进行。",
+            "note": f"缓存换算：用上次扫描已缓存的日K/分时（命中 {len(results)}/{len(cand)} 只）按完整评分标准筛选，"
+                    "未额外联网；未命中缓存的候选本次不参与。",
         }
     return {
         "ok": True,
@@ -6970,11 +7000,16 @@ def _ld_cache_put(key, val):
 
 
 def _ld_push_get(q, timeout=6):
-    """东财 push2 系列接口的多域名兜底（备用源）。"""
+    """东财 push2 系列接口的多域名兜底（备用源）。
+    v1.7.5：HTTP 200 但 body 为 null/{} 是限流常见「软失败」，旧代码 `or {}` 直接
+    返回，备用域名 82.push2/push2delay 永远轮不到——恰在最需要兜底时退化成空榜。"""
     last = None
     for h in LD_PUSH_HOSTS:
         try:
-            return http_json("https://" + h + q, timeout=timeout, retries=1) or {}
+            j = http_json("https://" + h + q, timeout=timeout, retries=1)
+            if isinstance(j, dict) and j.get("data"):
+                return j
+            last = RuntimeError("push2 empty response from " + h)
         except Exception as e:
             last = e
     raise last if last is not None else RuntimeError("push2 unavailable")
@@ -7510,8 +7545,14 @@ class Handler(BaseHTTPRequestHandler):
                 # 否则止损止盈与周线指标两处数值对不上；其余板块 160 根与卡片评分统一。
                 mode = (qs.get("mode", [""])[0] or "").strip()
                 _kl = 400 if mode == "swing" else 160
-                bars = fetch_kline(code, market, _kl, name=(q or {}).get("name") or "",
-                                   ttl=15 if fast else 300)   # 缓存只留一份，按需截取
+                try:
+                    bars = fetch_kline(code, market, _kl, name=(q or {}).get("name") or "",
+                                       ttl=15 if fast else 300)   # 缓存只留一份，按需截取
+                except Exception:
+                    # v1.7.5：日K三源全败会抛 EmptyData（cached 单飞还会广播给所有等待者）；
+                    # 与分时/快照一样降级为空 K，别让一只问题票把整个详情页拖成 500。
+                    # 下游 detail_metrics/trade_plan 对 bars=[] 均有保护。
+                    bars = []
                 try:
                     tr = fetch_trends(code, market, ttl=8 if fast else 60)
                 except Exception:
@@ -7720,13 +7761,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"}, 500)
 
 
-def pick_port():
-    import socket
+def create_server():
+    """挑端口并直接 bind 成服务，消除「探测空闲」与「真正 bind」之间的 TOCTOU：
+       并发起两个实例（或端口被别的进程抢走）时，bind 失败就顺延下一个端口，
+       而不是拿着过期端口让 ThreadingHTTPServer 构造抛 OSError 崩掉。"""
+    last = None
     for port in range(BASE_PORT, BASE_PORT + 30):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex((HOST, port)) != 0:
-                return port
-    return BASE_PORT
+        try:
+            srv = ThreadingHTTPServer((HOST, port), Handler)
+            return port, srv
+        except OSError as e:
+            last = e
+            continue
+    raise last if last is not None else RuntimeError("no free port in range")
 
 
 def find_running():
@@ -7841,9 +7888,8 @@ def main():
             open_browser(url0)
             return
 
-    port = pick_port()
+    port, srv = create_server()            # v1.7.5：探测+bind 原子化，避免端口竞态崩溃
     url = f"http://{HOST}:{port}/"
-    srv = ThreadingHTTPServer((HOST, port), Handler)
     _srv_ref[0] = srv                      # v1.7.3：供关页自动退出使用
     print("=" * 58)
     print(f"  {APP_TITLE}  v{VERSION}")

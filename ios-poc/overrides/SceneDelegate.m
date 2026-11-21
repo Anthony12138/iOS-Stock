@@ -33,9 +33,10 @@
 #import <WebKit/WebKit.h>
 #import <Python/Python.h>
 
-// 页面背景色（与 web/index.html 的 --bg 一致），避免唤醒瞬间闪出黑/白块
+// 页面背景色（v1.7.5 OLED 纯黑：与 web/index.html 的 html.ios-native --bg 一致）。
+// WebView 顶到屏幕最上沿、沉浸式状态栏，状态栏底色就是这里；必须与页面同为纯黑。
 static UIColor *PageBackgroundColor(void) {
-    return [UIColor colorWithRed:7.0 / 255.0 green:10.0 / 255.0 blue:17.0 / 255.0 alpha:1.0];
+    return [UIColor blackColor];
 }
 
 // 页面存活探针：readyState + 元素数量 + 页面自己记录的心跳失败次数。
@@ -84,6 +85,7 @@ static NSString *const kPauseJS =
 @property (nonatomic, assign) NSInteger wakeSeq;      // 自检轮次令牌：0 表示本轮已结束
 @property (nonatomic, assign) NSInteger wakeReloads;  // 冷却窗口内已自动重载次数
 @property (nonatomic, assign) NSTimeInterval wakeReloadAt;
+@property (nonatomic, assign) NSTimeInterval lastWakeVerifyAt; // 回前台自检去重时间戳
 @end
 
 @implementation SceneDelegate
@@ -277,7 +279,9 @@ static NSString *const kPauseJS =
     if (port <= 0) return;
     NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%d/", port];
     self.pageURL = [NSURL URLWithString:urlStr];
-    self.navFailCount = 0;
+    // v1.7.5 修复：不要在这里清零 navFailCount。失败重试也走本方法，
+    // 清零会让 didFail 里的计数永远回到 1，3 次上限形同虚设（无限重载）。
+    // 只有 didFinishNavigation 真成功、或用户点「重试」/recover 新开一轮时才清零。
     dispatch_async(dispatch_get_main_queue(), ^{
         self.statusLabel.hidden = YES;   // 成功后隐藏状态栏，网页铺满全屏
         self.retryButton.hidden = YES;
@@ -348,6 +352,7 @@ static NSString *const kPauseJS =
 
 - (void)retryTapped {
     self.wakeSeq = 0;
+    self.navFailCount = 0;   // 用户主动重试＝新开一轮，失败计数从头算
     // 服务若已在跑（GIL 已释放），只重载页面，绝不再碰 Python C API。
     if (self.gilReleased && self.serverPort > 0) {
         [self reloadPageForce:YES];
@@ -390,6 +395,7 @@ static NSString *const kPauseJS =
     if (!self.pyReady || self.bundleAppPath.length == 0) return;   // 启动都没成功，交给原错误界面
     self.recovering = YES;
     self.wakeSeq = 0;
+    self.navFailCount = 0;   // 重新加载是一轮新尝试，失败计数从头算
     NSLog(@"[iOS] wake recovery triggered: %@", reason);
 
     NSString *bundleApp = self.bundleAppPath;
@@ -411,6 +417,11 @@ static NSString *const kPauseJS =
 
 // 回前台自检入口
 - (void)verifyAfterWake {
+    // v1.7.5：UIApplication 通知与 Scene 生命周期在回前台时会各触发一次，
+    // 1s 内去重，避免两轮自检互相 ++wakeSeq 打断（令牌兜底虽能防误动作，仍白白探测两次）。
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (now - self.lastWakeVerifyAt < 1.0) return;
+    self.lastWakeVerifyAt = now;
     [self wakeCheck:1 allowLoading:NO];
 }
 
@@ -446,8 +457,12 @@ static NSString *const kPauseJS =
         }
         // ① 先让页面自己补一轮心跳（安卓壳一直是这么调的，iOS 之前漏了）
         [ss.webView evaluateJavaScript:kResumeJS completionHandler:nil];
-        // ② 再验「WebView → 本地服务」这条路
-        [ss runNetProbeOnRound:round seq:seq];
+        // ② 再验「WebView → 本地服务」这条路。
+        // v1.7.5 修复：换一个新令牌，让第①层的 1.6s 超时兜底立即失效——
+        // 链路探针本身要等 1.7s 才读结果，若两层共用 seq，超时块必然先触发，
+        // 健康状态回前台也会被误判成「页面探针无响应」而强刷。
+        NSInteger netSeq = ++ss.wakeSeq;
+        [ss runNetProbeOnRound:round seq:netSeq];
     }];
 }
 
@@ -455,6 +470,15 @@ static NSString *const kPauseJS =
 - (void)runNetProbeOnRound:(NSInteger)round seq:(NSInteger)seq {
     __weak typeof(self) weakSelf = self;
     [self.webView evaluateJavaScript:kNetProbeJS completionHandler:nil];
+    // 第二层独立兜底：WebContent 卡住导致 evaluateJavaScript 永不回调时，
+    // 6s 后强制恢复（覆盖 3s 服务探活 + 1.8s 重载窗口）。令牌只在本阶段有效。
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        SceneDelegate *ss = weakSelf;
+        if (!ss || ss.wakeSeq != seq) return;
+        ss.wakeSeq = 0;
+        [ss recoverNow:@"链路探针超时"];
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.7 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         SceneDelegate *ss = weakSelf;

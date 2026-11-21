@@ -84,7 +84,7 @@ plist["NSAppTransportSecurity"] = {
     "NSAllowsLocalNetworking": True,
 }
 # v1.7.2：沉浸式状态栏。WKWebView 顶到屏幕最上沿（见 SceneDelegate.m），
-# 页面背景是深色 #070A11，状态栏文字用白色才能看清、与页面连成一体。
+# v1.7.5 起页面/状态栏底色改为 OLED 纯黑 #000000，状态栏文字用白色才能看清、与页面连成一体。
 # 关闭「由 VC 管理状态栏」后下面两个全局开关才生效。
 plist["UIViewControllerBasedStatusBarAppearance"] = False
 plist["UIStatusBarStyle"] = "UIStatusBarStyleLightContent"

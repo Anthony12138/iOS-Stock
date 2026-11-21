@@ -792,6 +792,18 @@
     opacity:0;pointer-events:none;transition:.24s;z-index:200;box-shadow:0 10px 30px rgba(0,0,0,.4);
   }
   .toast.on{opacity:1;transform:translate(-50%,0)}
+  /* v1.7.5 iOS 回到顶部圆钮：基础样式默认不显示，只有 html.ios-native 下才启用 */
+  .backtop{
+    display:none;position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));
+    transform:translate(-50%,14px);z-index:150;
+    width:46px;height:46px;border-radius:50%;align-items:center;justify-content:center;
+    background:linear-gradient(145deg,#E9B949,#C9972E);color:#12161F;
+    border:1px solid rgba(255,222,150,.65);
+    box-shadow:0 6px 20px rgba(0,0,0,.55),0 0 0 1px rgba(233,185,73,.16),0 0 18px rgba(233,185,73,.3);
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .backtop.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
   .banner{
     background:rgba(240,75,78,.07);border:1px solid rgba(240,75,78,.24);border-radius:9px;
     padding:10px 14px;font-size:12px;color:#EFA9AB;margin-bottom:14px;display:none;
@@ -1085,7 +1097,8 @@
   /* 背景 + 操作面板 + 所有卡片纯黑（OLED 省电）；S/A 级金框保留并加光晕 */
   html.ios-native{--bg:#000000;--bg2:#000000;--panel:#000000;--panel2:#000000;--panel3:#000000}
   html.ios-native body{background:#000000}                    /* 盖掉 body 的两层径向渐变光晕 */
-  html.ios-native header{background:rgba(0,0,0,.92)}          /* 顶栏纯黑 */
+  html.ios-native header{background:#000000}                  /* 顶栏 + 状态栏区域纯黑（不透明，不透深蓝底色） */
+  html.ios-native .tabs{background:#000000}                   /* 板块选择栏：盖掉手机端硬编码的 #0A0E16 深蓝 */
   /* 评分卡 / 龙头卡背景是硬编码渐变，变量盖不到，单独覆盖成纯黑 */
   html.ios-native .ai-card,html.ios-native .lt-card{background:#000000}
   /* S/A 级金框保留（.ai-card.top3 由 goldCls 只给 S/A）+ 金色光晕；普通卡片仍是普通细框 */
@@ -1098,6 +1111,13 @@
     background:#000000;border-color:rgba(233,185,73,.55);
     box-shadow:0 0 0 1px rgba(233,185,73,.2),0 0 12px rgba(233,185,73,.25)
   }
+  /* 回到顶部圆钮：仅 iOS 显示 */
+  html.ios-native .backtop{display:flex}
+  /* v1.7.5 修复：圆钮 z-index 高于扫描遮罩/设置弹层，模态打开时必须一起隐藏，
+     否则会浮在遮罩上方还能点，滚到被锁住的背景。:has 老系统不支持时由 JS 定时兜底。 */
+  html.drawer-open .backtop,
+  html.ios-native body:has(#overlay.on) .backtop,
+  html.ios-native body:has(.sheet-mask.on) .backtop{opacity:0!important;pointer-events:none!important}
   /* AI 多日持股开关：占满整列 + 加边框，外观与一夜持股 .scan-sw 一致（覆盖内联样式） */
   html.ios-native #aiSwingToggleRow{
     display:flex!important;width:100%!important;max-width:100%!important;box-sizing:border-box!important;
@@ -1859,6 +1879,13 @@
 
 <div class="toast" id="toast" aria-live="polite"></div>
 
+<!-- v1.7.5 iOS 专属：下滑后底部中间的回到顶部圆钮（PC 端 display:none 不显示） -->
+<button class="backtop" id="btnBackTop" type="button" aria-label="回到顶部" title="回到顶部">
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+    <path d="M12 19V6M6 12l6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</button>
+
 <script>
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -2577,7 +2604,7 @@ async function scan(silent, fast, extSignal, force) {
     // 与表格 / countPill 一致：叠加股价筛选后统一算入选数
     const n = (r.list || []).filter(x => gateScore(x) >= sm && inPF(x)).length;
     if (isFast) {
-      toast(`快速换算完成 · 命中缓存 ${r.cache_hit}/${r.cache_pool} 只 · 正在按完整口径复核…`);
+      toast(`已用缓存数据按完整评分标准筛选 · 命中 ${r.cache_hit}/${r.cache_pool} 只 · 未联网`);
       state.lastPickCount = n;
     } else if (quiet) {
       // 静默刷新只在结果数量变化时轻提示一下；没停在这个板块就不打扰
@@ -2605,6 +2632,9 @@ async function scan(silent, fast, extSignal, force) {
   } finally {
     if (scanAbort === ctl) scanAbort = null;   // 谁建谁清，不碰别的扫描的控制器
     state.scanning = false;
+    // v1.7.5 修复：静默扫描期间若切过板块，syncRefreshBtn 已把刷新键置灰；
+    // 这里必须无条件重算一次，否则它要卡灰到下次切板块才自愈。
+    syncRefreshBtn();
     if (!quiet) {
       setLoading(false);
       lockScanBtns(false);
@@ -2740,7 +2770,7 @@ function renderScanCards(arr) {
         <span class="ai-name">${esc(x.name)}</span>
         <span class="ai-code">${esc(x.code)}</span>
         ${buyBadgeHtml(x)}
-        ${x._fast ? '<span class="ai-flag" title="用上次扫描已缓存的日K/分时快速换算，完整复核后自动替换">缓存换算</span>' : ''}
+        ${x._fast ? '<span class="ai-flag" title="用上次扫描已缓存的日K/分时，按完整评分标准筛选得出；未额外联网">缓存换算</span>' : ''}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
       ${dimBadges(x)}
@@ -6393,6 +6423,27 @@ function scrollTopZero() {
   try { document.documentElement.scrollTop = 0; } catch (e) {}
   try { window.scrollTo(0, 0); } catch (e) {}
 }
+/* v1.7.5 iOS 回到顶部圆钮：body 下滑超过约 0.7 屏显示，点按回顶后隐藏。
+   PC 端 .backtop 是 display:none，这里即使跑也点不到，零影响。 */
+(function initBackTop() {
+  const btn = $('#btnBackTop');
+  if (!btn) return;
+  const update = () => {
+    const y = document.body.scrollTop || document.documentElement.scrollTop || window.scrollY || 0;
+    // 扫描遮罩 / 设置弹层打开时也算模态：圆钮 z-index 高于它们，不隐藏会浮在遮罩上
+    const modal = !!document.querySelector('#overlay.on, .sheet-mask.on');
+    const shown = y > Math.max(360, window.innerHeight * 0.7)
+      && !document.body.classList.contains('drawer-open') && !modal;
+    btn.classList.toggle('on', !!shown);
+  };
+  window.addEventListener('scroll', update, { passive: true });
+  document.body.addEventListener('scroll', update, { passive: true });  // 手机端 body 才是滚动容器
+  window.addEventListener('resize', update, { passive: true });
+  btn.addEventListener('click', () => { scrollTopZero(); update(); });
+  update();
+  // 模态开关不触发 scroll 事件；iOS 上定时兜底同步（PC display:none，不装定时器）
+  if (document.documentElement.classList.contains('ios-native')) setInterval(update, 500);
+})();
 $$('.tab').forEach(t => {
   t.onclick = () => {
     $$('.tab').forEach(x => x.classList.remove('on'));
@@ -6485,10 +6536,15 @@ async function runAll(force) {
   const cb = $('#btnCancelScan'); if (cb) cb.style.display = '';   // 这次可取消
   const steps = [18, 40, 62, 82, 92];
   let i = 0, canceled = false;
+  const skipped = [];   // v1.7.5 修复：被别的扫描占用而没真正执行的板块，不能算「已刷新」
   try {
     for (const [name, fn] of ALL_VIEW_RUN) {
       if (allCtl.signal.aborted) { canceled = true; break; }        // 取消：跳过剩余板块
-      try { await fn(allCtl, forceToken); } catch (e) { /* 单板块失败不影响其余板块 */ }
+      let res;
+      try { res = await fn(allCtl, forceToken); } catch (e) { /* 单板块失败不影响其余板块 */ }
+      // 静默扫描（自动重扫/快刷）期间 state.scanning=true 但不锁本按钮；此时
+      // scan() 立即返回 'busy'。旧代码丢弃返回值仍 i++，最后谎报「五个板块已全部刷新」。
+      if (res === 'busy') { skipped.push(name); continue; }
       i += 1;
       // 只更新文案/进度，绝不再 setLoading(true)——否则 overlayN 累加到关不掉（卡在「全部完成」）
       if (allCtl.signal.aborted) { canceled = true; break; }
@@ -6497,6 +6553,10 @@ async function runAll(force) {
     if (canceled) {
       setLoadText('已取消', '本次全板块扫描已取消，未完成的板块保留上次结果', 100);
       toast('已取消本次扫描', 1800);
+    } else if (skipped.length) {
+      // 明确告诉用户哪些板块没刷到，别让缓存旧值冒充最新行情
+      setLoadText('部分完成', `${skipped.join('、')} 正在扫描中，未重复拉取`, 100);
+      toast(`已刷新 ${i} 个板块；${skipped.join('、')} 正在扫描中未刷新`, 2600);
     } else {
       setLoadText('正在刷新全部板块…', '全部完成', 100);
       toast('五个板块已全部刷新', 2200);
