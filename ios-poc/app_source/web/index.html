@@ -1114,6 +1114,21 @@
 
   <!-- ============ 选股视图 ============ -->
   <section id="view-scan">
+    <div class="ai-head">
+      <div>
+        <h2>一夜持股 · 主板</h2>
+        <div class="desc">按涨幅 → 量比 → 换手 → 市值逐层过滤，尾盘给出买点提示。</div>
+      </div>
+    </div>
+    <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-scan"><input class="search" id="search" placeholder="代码 / 名称 / 行业" /></div></div>
+    <div class="funnel" id="funnel">
+      <div class="fstep"><div class="lbl">全市场主板</div><div class="val num" id="f0">—</div><div class="bar"><i style="width:100%"></i></div></div>
+      <div class="fstep"><div class="lbl">① 涨幅 3~5%</div><div class="val num" id="f1">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep"><div class="lbl">② 量比 ≥ 1</div><div class="val num" id="f2">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep"><div class="lbl">③ 换手 5~10%</div><div class="val num" id="f3">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep"><div class="lbl">④ 流通市值 50~200亿</div><div class="val num" id="f4">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep last"><div class="lbl">⑤~⑧ 深度入选</div><div class="val num" id="f5">—</div><div class="bar"><i></i></div></div>
+    </div>
     <div class="main">
       <!-- 左：条件 -->
       <aside class="card" style="position:sticky;top:78px">
@@ -1238,15 +1253,6 @@
         <div class="ai-grid" id="scanGrid"></div>
       </section>
     </div>
-    <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-scan"><input class="search" id="search" placeholder="代码 / 名称 / 行业" /></div></div>
-    <div class="funnel" id="funnel">
-      <div class="fstep"><div class="lbl">全市场主板</div><div class="val num" id="f0">—</div><div class="bar"><i style="width:100%"></i></div></div>
-      <div class="fstep"><div class="lbl">① 涨幅 3~5%</div><div class="val num" id="f1">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep"><div class="lbl">② 量比 ≥ 1</div><div class="val num" id="f2">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep"><div class="lbl">③ 换手 5~10%</div><div class="val num" id="f3">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep"><div class="lbl">④ 流通市值 50~200亿</div><div class="val num" id="f4">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep last"><div class="lbl">⑤~⑧ 深度入选</div><div class="val num" id="f5">—</div><div class="bar"><i></i></div></div>
-    </div>
   </section>
 
   <!-- ============ AI 荐股 ============ -->
@@ -1291,7 +1297,7 @@
     </div>
 
     <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-ai"></div></div>
-    <div class="ai-swing-toggle" id="aiSwingToggleRow" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;box-sizing:border-box;background:var(--bg2,#182231);border-radius:8px;padding:9px 11px;margin:0 0 10px;cursor:pointer">
+    <div class="ai-swing-toggle" id="aiSwingToggleRow" style="display:inline-flex;align-items:center;justify-content:space-between;gap:10px;width:300px;max-width:100%;box-sizing:border-box;background:var(--bg2,#182231);border-radius:8px;padding:9px 11px;margin:0 0 10px;cursor:pointer">
       <div>
         <div style="font-size:12px;color:var(--text,#E9EFF8)" id="aiSwingLabel">多日持股算法</div>
         <div style="font-size:11px;color:var(--muted,#7C8798);margin-top:2px" id="aiSwingDesc">开启后按趋势波段口径筛选（仅影响 AI 荐股）</div>
@@ -3418,6 +3424,27 @@ function syncHeadPrice(item, px, pc) {
 /* v1.5.17：详情顶部补出快照里的今开/最高/最低/成交额。
    后端只有在确认是今日快照时才给 quote，休市拿到旧快照时这里保持「—」。 */
 function syncQuoteStats(d, item) {
+  // v1.7.3：详情量比 / 主力净额优先取单股接口实时值，覆盖列表项里的旧快照。
+  // 列表批量源被限流回退新浪时会缺主力净额，这里失败仍显示「—」，不伪造 0。
+  const ex = d && d.extra;
+  if (ex && item) {
+    if (item.mode !== 'zt' && item.mode !== 'dt') {
+      const vr = Number(ex.volratio);
+      if (ex.volratio != null && isFinite(vr) && vr > 0) {
+        item.volratio = vr;
+        const e = $('#dVr'); if (e) e.textContent = vr.toFixed(2);
+      }
+    }
+    const nv = Number(ex.main_net);
+    if (ex.main_net != null && isFinite(nv)) {
+      item.main_net = nv;
+      const e = $('#dNet');
+      if (e) {
+        e.textContent = (nv > 0 ? '+' : '') + nv.toFixed(2) + '亿';
+        e.className = 'v num ' + fmt.cls(nv);
+      }
+    }
+  }
   const q = d && d.quote;
   if (!q) return;
   const pc = Number(q.prev_close) || Number(item && item.prev_close) || 0;

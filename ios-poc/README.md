@@ -34,9 +34,11 @@
 | `ios-upload.zip` | 本目录完整打包，直接解压覆盖上传到 GitHub 仓库即可 |
 | `.github/workflows/build.yml` | 云编译：下载 Python 包→打补丁→archive→打包 ipa→上传 |
 
-**PC 端同源升级。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.7.2）。App 显示名「股票筛选系统」、图标与 PC 端一致。
+**PC 端同源升级。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.7.3）。App 显示名「股票筛选系统」、图标与 PC 端一致。
 
-v1.7.2 iOS 变更：①详情在周末/节假日/盘前用上一交易日快照并弹标注（午休/收盘后不弹）；②禁 WKWebView 捏合放大；③沉浸式状态栏（WebView 顶到屏幕沿 + 白色状态栏文字 + 页面 safe-area 避让，由 `patch_project.py` 注入 plist）。
+v1.7.3 iOS 变更：①一夜持股加「一夜持股 · 主板」标题，搜索 + 漏斗移到板块顶部；②ipa 版本号从 `app.py` 的 `VERSION` 动态写入 plist（不再固定 1.0），包名统一为 `org.python.stockscreener`（`patch_project.py` 与 `build.yml` 的 `PRODUCT_BUNDLE_IDENTIFIER` 同步）；③详情量比 / 主力净额由单股接口补齐。
+
+v1.7.2 iOS 变更（已包含）：①详情在周末/节假日/盘前用上一交易日快照并弹标注（午休/收盘后不弹）；②禁 WKWebView 捏合放大；③沉浸式状态栏（WebView 顶到屏幕沿 + 白色状态栏文字 + 页面 safe-area 避让，由 `patch_project.py` 注入 plist）。
 
 ---
 
@@ -79,7 +81,7 @@ ios-poc/
 
 ### 第 4 步：验证（关键）
 
-1. 启动页会先显示 **"股票筛选系统 iOS v1.7.0 · 正在启动…"**，随后进入完整功能界面。如果还是 "Python on iOS OK"，说明装的仍是旧 POC 包，需要重新编译 + 侧载。
+1. 启动页会先显示 **"股票筛选系统 iOS v1.7.3 · 正在启动…"**，随后进入完整功能界面。如果还是 "Python on iOS OK"，说明装的仍是旧 POC 包，需要重新编译 + 侧载。LiveContainer 列表应显示「1.7.3 - org.python.stockscreener」；bundle id 变更后会与旧包并存，属于正常现象。
 2. 跑一次"一夜持股"扫描，**确认能抓到行情数据**（有票、有分数）。这一步验证 iOS 版 Python 的 https 能否正常访问行情接口。
 3. 若有数据 → 大功告成；若扫描报"数据源失败/全是 0"，多半是 SSL 证书问题，把现象发我，我调整证书兜底（安卓已有同款处理，可控）。
 
@@ -88,7 +90,7 @@ ios-poc/
 ## 四、已做的验证
 
 - ✅ POC 真机跑通（CPython 解释器 + socket + WKWebView 三件套成立）。
-- ✅ `ios_boot.py` 本地行为验证：资源复制正确、二次同步不重写、`start()` 能起真实服务、`/api/health` 返回 `1.7.0`、首页返回完整前端。
+- ✅ `ios_boot.py` 本地行为验证：资源复制正确、二次同步不重写、`start()` 能起真实服务、`/api/health` 返回 `1.7.3`、首页返回完整前端。
 - ✅ `patch_project.py` 端到端模拟：文件到位、ATS 注入、ObjC 引用一致。
 - ✅ Python/YAML 语法检查全过。
 

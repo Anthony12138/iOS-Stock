@@ -1129,6 +1129,64 @@ def fetch_realtime_quote(code, market, ttl=8):
     return cached("q:%s:%s" % (market, code), ttl, build)
 
 
+def fetch_detail_extra(code, market, ttl=60):
+    """详情专用单股补齐「量比 / 主力净额」，只给 /api/stock 用。
+
+    列表快照走 push2 批量接口，被限流后回退新浪（新浪没有主力净额），
+    详情若只信列表项快照，这两格就会一直停在「—」。单股接口与批量接口
+    限流互不影响，这里实测可用：
+      主力净额 = 东财 push2 单股资金流日K末条 f52（元），即当日/最近交易日；
+      量比     = 东财单股 stock/get 的 f50 ÷ 100，失败退腾讯 qt.gtimg 的 p[49]。
+    多域名兜底，任一项失败留 None，由前端显示「—」而不是伪造 0。
+    """
+    secid = f"{1 if market == 1 else 0}.{code}"
+
+    def build():
+        out = {"volratio": None, "main_net": None}
+        # ① 主力净额：东财单股资金流日K（f52 主力净流入，单位元）
+        for host in ("push2.eastmoney.com", "push2delay.eastmoney.com", "82.push2.eastmoney.com"):
+            try:
+                url = (f"https://{host}/api/qt/stock/fflow/kline/get?lmt=3&klt=101&secid={secid}"
+                       "&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56")
+                txt = http_text(url, timeout=6, retries=1,
+                                headers={**HEADERS, "Referer": "https://quote.eastmoney.com/"})
+                klines = ((json.loads(txt).get("data") or {}).get("klines") or [])
+                if not klines:
+                    continue
+                parts = str(klines[-1]).split(",")
+                if len(parts) >= 2 and parts[1] not in ("", "-", "--"):
+                    # 元 → 亿，与列表 main_net 同单位；0 是真实结果，不算缺失
+                    out["main_net"] = round(float(parts[1] or 0) / 1e8, 2)
+                    break
+            except Exception:
+                continue
+        # ② 量比：东财单股 f50（放大 100 倍）；再退腾讯 p[49]
+        for host in ("push2.eastmoney.com", "push2delay.eastmoney.com"):
+            try:
+                url = f"https://{host}/api/qt/stock/get?secid={secid}&fields=f50&invt=2"
+                txt = http_text(url, timeout=6, retries=1,
+                                headers={**HEADERS, "Referer": "https://quote.eastmoney.com/"})
+                v = ((json.loads(txt).get("data") or {}).get("f50"))
+                if isinstance(v, (int, float)) and float(v) > 0:
+                    out["volratio"] = round(float(v) / 100.0, 2)
+                    break
+            except Exception:
+                continue
+        if out["volratio"] is None:
+            try:
+                txt = http_text("https://qt.gtimg.cn/q=" + _tencent_symbol(code, market),
+                                encoding="gbk", timeout=6, retries=1,
+                                headers={**HEADERS, "Referer": "https://gu.qq.com/"})
+                p = (txt.split('"')[1] if '"' in txt else "").split("~")
+                if len(p) >= 50 and float(p[49] or 0) > 0:
+                    out["volratio"] = round(float(p[49]), 2)
+            except Exception:
+                pass
+        return out
+
+    return cached("dextra:%s:%s" % (market, code), ttl, build)
+
+
 def _today_bar(q, today, prev):
     """把实时快照折成一根日K；pct 用今日昨收，与分时图刻度同口径。"""
     px = float(q.get("price") or 0)
@@ -7422,9 +7480,17 @@ class Handler(BaseHTTPRequestHandler):
                     pd = q_date if (q_date and q_date != today) else str((bars[-1].get("date") if bars else "") or "")
                     if len(pd) >= 10:
                         prev_day = pd[5:10]
+                # v1.7.3：详情量比 / 主力净额用单股接口补齐。列表快照被 push2 批量
+                # 限流回退新浪时会缺主力净额，详情不能再拿旧快照顶替；失败留 None，
+                # 前端按缺失显示「—」。绝不让补数失败拖垮整张详情。
+                try:
+                    extra = fetch_detail_extra(code, market, ttl=8 if fast else 60)
+                except Exception:
+                    extra = {"volratio": None, "main_net": None}
                 resp = {"ok": True, "code": code, "kline": bars, "trends": tr,
                         "quote": q if (fresh_q or stale_q) else None,
                         "prev_day": prev_day,
+                        "extra": extra,
                         "trade": trade, "metrics": detail_metrics(bars)}
                 # v1.6.7：所有板块的详情分时都叠加上证指数（以前只有 scan 取）。
                 # 与个股分时同一时刻口径，缓存 60 秒全站复用，多这一次请求基本无感；
