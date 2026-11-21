@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.4"
+VERSION = "1.7.5"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -746,6 +746,29 @@ def cache_peek(key, max_age):
         if time.time() - ts > max_age:
             return None
         return val
+
+
+# v1.7.5：「开始扫描」强制从数据源全量拉取——用一次性 token 清缓存实现。
+# 为什么不用线程标志：真正取数（逐票日K/分时）在 ThreadPoolExecutor 子线程里调用 cached()，
+# threading.local 传不进去。改为「前端整批扫描带同一个 token，后端首次见到就清空全部缓存」，
+# 之后同批次的其余板块请求自然 miss 重拉并写回最新值；不用改任何业务函数签名。
+_FORCE_BATCH = {"token": None}
+_FORCE_LOCK = threading.Lock()
+
+
+def force_begin(token):
+    """一次强制全量扫描开始时调用。token 由前端为每批生成（时间戳），
+    同一 token 只清一次缓存——五个板块里第一个请求清，其余四个共享刚重拉的数据，
+    避免重复清空导致五个板块各自重拉同一份快照。返回是否是本次批次的首个请求。"""
+    if not token:
+        return False
+    with _FORCE_LOCK:
+        if _FORCE_BATCH["token"] == token:
+            return False
+        _FORCE_BATCH["token"] = token
+    with _cache_lock:
+        _cache.clear()
+    return True
 
 
 # ---------------------------------------------------------------- 行情抓取
@@ -7385,6 +7408,15 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         path, qs = u.path, urllib.parse.parse_qs(u.query)
         try:
+            # v1.7.5：「开始扫描」在五个板块请求上都带同一个 force token（本次扫描批次）。
+            # 首批（首个板块）见到就清空全部缓存，令五板块都从数据源重拉最新数据；
+            # 同批其余板块共享刚写回的新缓存，不重复清。force 参数不透传给业务函数。
+            # 普通「刷新」/自动重扫/冷启动不带 force，走原有缓存路径，行为完全不变。
+            _FORCE_PATHS = ("/api/scan", "/api/ai_pick", "/api/limit_up",
+                            "/api/limit_down", "/api/leader")
+            _force_token = qs.pop("force", [""])[0] if path in _FORCE_PATHS else ""
+            if _force_token:
+                force_begin(_force_token)
             if path in ("/", "/index.html"):
                 fp = os.path.join(WEB_DIR, "index.html")
                 if not os.path.exists(fp):

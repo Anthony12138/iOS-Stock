@@ -838,8 +838,15 @@
     header .clock{order:3;flex:0 0 auto;margin-left:auto;font-size:11px}
     header .pill{display:inline-flex}
     header #btnScan{order:5;flex:1 1 auto;justify-content:center;height:34px;font-size:13px}
-    header #btnAuto{
+    /* v1.7.5：刷新键排在「开始扫描」与「选项」之间，只留图标（顺时针单箭头） */
+    header #btnRefresh{
       order:6;position:relative;flex:0 0 34px;width:34px;height:34px;padding:0;
+      border-radius:10px;justify-content:center;
+    }
+    header #btnRefresh .lbl{display:none}
+    header #btnRefresh svg{width:17px;height:17px}
+    header #btnAuto{
+      order:7;position:relative;flex:0 0 34px;width:34px;height:34px;padding:0;
       border-radius:10px;justify-content:center;
     }
     header #btnAuto .lbl{display:none}
@@ -1107,6 +1114,15 @@
       <circle cx="11" cy="17" r="2.4" stroke="currentColor" stroke-width="1.8" />
     </svg>
     <span class="lbl">选项</span><span class="auto-badge" id="autoBadge" hidden>0</span>
+  </button>
+  <!-- v1.7.5：刷新键=用热缓存只刷当前板块；开始扫描=强制从数据源全量拉取五板块。
+       PC 位于选项与开始扫描之间（图标+字样）；iOS 由下方 media query 排到选项左边、只显图标。 -->
+  <button class="btn" id="btnRefresh" title="用现有缓存刷新当前板块（快）" aria-label="刷新当前板块">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true">
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M21 3v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+    <span class="lbl">刷新</span>
   </button>
   <button class="btn primary" id="btnScan">开始扫描</button>
 </header>
@@ -1981,10 +1997,25 @@ function setLoading(on, title, sub, pct) {
   setLoadText(title, sub, pct);
 }
 
-/* 顶栏两个扫描按钮统一锁：一个板块在跑的时候别让人再点一次 */
+/* 顶栏扫描/刷新按钮统一锁：一个板块在跑的时候别让人再点一次。
+   v1.7.5：刷新键（btnRefresh）也纳入同一把锁，两个按钮不会互踩。
+   「刷新」只在有扫描动作的板块可用——股票搜索/战法规则没有数据源请求，置灰不可点。 */
 function lockScanBtns(on) {
   const b = $('#btnScan');
   if (b) { b.disabled = on; b.textContent = on ? '扫描中…' : '开始扫描'; }
+  const r = $('#btnRefresh');
+  if (r) {
+    const noScanView = state.view === 'review' || state.view === 'strategy';
+    r.disabled = on || noScanView;
+  }
+}
+/* 切板块时刷新「刷新键」可用性：股票搜索 / 战法规则无扫描动作，置灰禁用 */
+function syncRefreshBtn() {
+  const r = $('#btnRefresh');
+  if (!r) return;
+  const noScanView = state.view === 'review' || state.view === 'strategy';
+  const busy = state.scanning || state.aiLoading || state.ztdLoading || state.dtdLoading || state.ldLoading;
+  r.disabled = noScanView || busy;
 }
 
 /* 五个板块共用同一条扫描进度浮层（就是 App 刚打开时那个）：
@@ -2466,7 +2497,7 @@ function clearBanner() {
   if (b && b.classList.contains('on')) { b.classList.remove('on'); b.classList.remove('info'); b.textContent = ''; }
 }
 
-async function scan(silent, fast, extSignal) {
+async function scan(silent, fast, extSignal, force) {
   // 30 秒一档，上一轮没跑完就跳过本轮，避免请求叠在一起
   // 返回明确的 'busy'（而非 undefined），供开关切换编排区分「被锁跳过」和「成功」。
   if (state.scanning) return 'busy';
@@ -2476,6 +2507,7 @@ async function scan(silent, fast, extSignal) {
   const p = readParams();
   const _qsObj = new URLSearchParams(p);
   if (isFast) _qsObj.set('fast', '1');   // 告诉后端只读缓存、不联网
+  if (force) _qsObj.set('force', force); // v1.7.5：开始扫描=强制从数据源重拉
   const qs = _qsObj.toString();
   state.scanning = true;
   let ctl = null;                 // 主扫描也接取消：全市场逐票拉数据最耗时，不能只能干等
@@ -5725,7 +5757,7 @@ if ($('#aiSwingChk')) {
   });
 }
 
-async function runAI(silent, extSignal) {
+async function runAI(silent, extSignal, force) {
   if (state.aiLoading) return;
   state.aiLoading = true;
   const quiet = silent === true;            // 自动重扫：不动按钮、不弹遮罩
@@ -5751,6 +5783,7 @@ async function runAI(silent, extSignal) {
       top: $('#aiTop').value,
     });
     if (aiUseSwing()) qs.set('algo', 'swing');   // 仅本次 AI 荐股请求切到多日持股算法
+    if (force) qs.set('force', force);           // v1.7.5：开始扫描=强制从数据源重拉
     const r = await api('/api/ai_pick?' + qs, prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || r.ok === false) throw new Error((r && r.error) || '接口返回异常');
     (r.list || []).forEach(x => { delete x._fast; delete x._new; });   // 手动/自动重扫：去掉旧角标
@@ -5942,7 +5975,7 @@ function renderZT() {
   });
 }
 
-async function runZT(silent, extSignal) {
+async function runZT(silent, extSignal, force) {
   if (state.ztdLoading) return;
   state.ztdLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
@@ -5962,7 +5995,7 @@ async function runZT(silent, extSignal) {
     setMeta('zt', '分析中', sec + 's');
   }, quiet ? 2000 : 500);
   try {
-    const r = await api('/api/limit_up', prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
+    const r = await api('/api/limit_up' + (force ? '?force=' + force : ''), prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || !r.ok) throw new Error((r && r.error) || '获取失败');
     state.ztd = r;
     dimFoldAll();                 // 新响应先按本地开关校正，避免后端口径覆盖（含自动重扫）
@@ -6111,7 +6144,7 @@ function renderDT() {
   });
 }
 
-async function runDT(silent, extSignal) {
+async function runDT(silent, extSignal, force) {
   if (state.dtdLoading) return;
   state.dtdLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
@@ -6131,7 +6164,7 @@ async function runDT(silent, extSignal) {
     setMeta('dt', '分析中', sec + 's');
   }, quiet ? 2000 : 500);
   try {
-    const r = await api('/api/limit_down', prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
+    const r = await api('/api/limit_down' + (force ? '?force=' + force : ''), prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || !r.ok) throw new Error((r && r.error) || '获取失败');
     state.dtd = r;
     dimFoldAll();                 // 新响应先按本地开关校正，避免后端口径覆盖（含自动重扫）
@@ -6261,7 +6294,7 @@ function renderLD() {
   });
 }
 
-async function runLD(silent, extSignal) {
+async function runLD(silent, extSignal, force) {
   if (state.ldLoading) return;
   state.ldLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
@@ -6281,6 +6314,7 @@ async function runLD(silent, extSignal) {
   }, quiet ? 2000 : 500);
   try {
     const qs = new URLSearchParams({ boards: $('#ldBoards').value, follow: $('#ldFollow').value });
+    if (force) qs.set('force', force);           // v1.7.5：开始扫描=强制从数据源重拉
     const r = await api('/api/leader?' + qs.toString(), prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || !r.ok) throw new Error((r && r.error) || '获取失败');
     state.ldd = r;
@@ -6353,6 +6387,7 @@ $$('.tab').forEach(t => {
     // 切板块时按最新开关状态重绘目标板块：开关 / 公告刷新重算的是数据，
     // 只切 display 会让其它板块的卡片仍显示旧分数与旧徽章（看起来像开关没生效）。
     renderCurrent();
+    syncRefreshBtn();   // v1.7.5：股票搜索/战法规则时刷新键置灰禁用
     if (state.view === 'review') { /* 股票搜索：由搜索按钮触发，不自动请求 */ }
     // v1.6.3 并发互斥：任何板块在扫时，切板块不再自动叠加新扫描——旧逻辑会互踩
     // 取消控制器/进度浮层/按钮锁（静默自动重扫不受影响，它们不走浮层）。
@@ -6403,17 +6438,20 @@ const isPhone = () => window.matchMedia('(max-width:760px)').matches;
 /* v1.7.3：顶栏「开始扫描」对全部板块生效——点一下，五个分析板块一起刷新。
    各板块刷新函数用 silent=true 静默调用（不动自己的按钮/遮罩），由这里统一锁按钮、统一进度提示。 */
 const ALL_VIEW_RUN = [
-  ['一夜持股', (sig) => scan(true, false, sig)],
-  ['AI 荐股', (sig) => runAI(true, sig)],
-  ['涨停分析', (sig) => runZT(true, sig)],
-  ['跌停分析', (sig) => runDT(true, sig)],
-  ['龙头分析', (sig) => runLD(true, sig)]
+  ['一夜持股', (sig, force) => scan(true, false, sig, force)],
+  ['AI 荐股', (sig, force) => runAI(true, sig, force)],
+  ['涨停分析', (sig, force) => runZT(true, sig, force)],
+  ['跌停分析', (sig, force) => runDT(true, sig, force)],
+  ['龙头分析', (sig, force) => runLD(true, sig, force)]
 ];
 let scanAllRunning = false;
-async function runAll() {
+async function runAll(force) {
   if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
   scanAllRunning = true;
   lockScanBtns(true);
+  // v1.7.5：每批强制扫描生成唯一 token，后端首次见到就清缓存令五板块重拉数据源；
+  // 不传 force（冷启动/自动补扫）则走缓存，与旧行为一致。
+  const forceToken = force ? ('f' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)) : '';
   // v1.7.4：全板块扫描接取消控制器，并把「取消本次扫描」按钮显示出来。
   // 五个板块都以静默模式跑（各自不碰遮罩/按钮），由这里统一接一个 signal。
   const allCtl = new AbortController();
@@ -6425,7 +6463,7 @@ async function runAll() {
   try {
     for (const [name, fn] of ALL_VIEW_RUN) {
       if (allCtl.signal.aborted) { canceled = true; break; }        // 取消：跳过剩余板块
-      try { await fn(allCtl); } catch (e) { /* 单板块失败不影响其余板块 */ }
+      try { await fn(allCtl, forceToken); } catch (e) { /* 单板块失败不影响其余板块 */ }
       i += 1;
       // 只更新文案/进度，绝不再 setLoading(true)——否则 overlayN 累加到关不掉（卡在「全部完成」）
       if (allCtl.signal.aborted) { canceled = true; break; }
@@ -6446,20 +6484,45 @@ async function runAll() {
     lockScanBtns(false);
   }
 }
-/* v1.7.4：顶栏按钮恒定「开始扫描」，每次点击都扫全部板块。
-   实测：缓存热时全板块 5 个接口串行合计仅约 1.3s，与单板块（0.02~0.5s）差距极小，
-   只有冷启动首扫一夜持股约 18s——那一次本就该全扫备数据。故不做「首次全板块 / 之后当前板块」分发，
-   保持逻辑最简单；按钮文案固定，等待浮层文案随板块进度变化即可。 */
-function runCurrent() { return runAll(); }
+/* v1.7.5：顶栏两个按钮职责拆分——
+   「开始扫描」= 无条件强制从数据源拉取五个板块最新数据（与冷启动一致，慢但最新）；
+   「刷新」= 只用现有热缓存刷当前一个板块（快，秒出），其余板块不动。
+   按钮文案固定「开始扫描」，等待浮层文案随板块进度变化。 */
+function runCurrent() { return runAll(true); }
 $('#btnScan').onclick = runCurrent;
-$('#btnScan').title = '扫描全部板块（一夜持股 / AI / 涨停 / 跌停 / 龙头）';
+$('#btnScan').title = '强制从数据源拉取并刷新五个板块（一夜持股 / AI / 涨停 / 跌停 / 龙头）';
+
+/* 刷新键：用热缓存只刷当前板块。股票搜索/战法规则无扫描动作，直接提示。
+   一夜持股走 fast=1 只读缓存换算（秒出，和宽松开关切换同一套）；其余板块重新请求即命中各自缓存。 */
+async function refreshCurrent() {
+  if (state.view === 'review' || state.view === 'strategy') {
+    toast('当前板块无需刷新', 1600);
+    return;
+  }
+  const label = ({ scan: '一夜持股', ai: 'AI 荐股', zt: '涨停分析', dt: '跌停分析', ld: '龙头分析' })[state.view] || '当前板块';
+  toast('正在用缓存刷新「' + label + '」…', 1500);
+  try {
+    if (state.view === 'scan') {
+      const r = await scan(true, true);                     // fast：只读缓存，不联网
+      if (r === 'insufficient') toast('暂无缓存数据，请点「开始扫描」拉取', 2400);
+    }
+    else if (state.view === 'ai') await runAI(true);
+    else if (state.view === 'zt') await runZT(true);
+    else if (state.view === 'dt') await runDT(true);
+    else if (state.view === 'ld') await runLD(true);
+  } catch (e) { /* 各 run 函数内部已有失败提示 */ }
+}
+$('#btnRefresh').onclick = refreshCurrent;
 (async () => {
   renderScanCards([]);       // 手机端先落一个「尚未扫描」的卡片空态
+  syncRefreshBtn();          // v1.7.5：恢复的 view 若是股票搜索/战法规则，刷新键先置灰
   await loadSettings();      // 先把上次保存的参数恢复，再按这份参数扫描
   // v1.7.4：冷启动一次扫齐五个板块。此前只 scan() 一夜持股，其余板块 state 为空，
   // 切到 AI/涨停/跌停/龙头时会被 tab 切换的懒加载逐个补扫——iOS 上体感「切板块又扫一次」。
   // 改成 runAll() 后五板块数据一次备齐，切板块不再触发补扫（深链切换也会被并发互斥挡住不叠加）。
-  runAll();
+  // v1.7.5：冷启动传 force=true——与「开始扫描」一样强制从数据源拉最新；即使 iOS 自愈重载
+  // （进程未重启、缓存还在）也不会拿旧缓存冒充最新数据。
+  runAll(true);
 })();
 
 /* 手机端把顶栏 + 板块栏合并吸顶：板块栏 sticky 的 top 必须等于 header 实际高度。
