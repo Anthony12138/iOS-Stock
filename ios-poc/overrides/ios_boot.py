@@ -172,8 +172,10 @@ def start(bundle_app: str, runtime: str) -> int:
         _write_startup_log(runtime)
 
         import app                              # 必须在 chdir 之后导入
-        port = app.pick_port()
-        srv = app.ThreadingHTTPServer((app.HOST, port), app.Handler)
+        # v1.7.5 C4 修复后 app.py 已用 create_server() 取代 pick_port()+构造，
+        # 这里必须同步——否则 iOS 壳调 pick_port 抛 AttributeError，本地服务起不来。
+        # create_server() 内部已完成 探测+bind，直接拿 (port, srv)。
+        port, srv = app.create_server()
         srv.daemon_threads = True
         threading.Thread(target=srv.serve_forever, name="http", daemon=True).start()
 
