@@ -403,6 +403,16 @@
   .ai-ctl > .btn.primary{width:100%;height:34px;flex:0 0 auto}
   .ai-ctl > .seg,.ai-ctl > .ai-swing-toggle{width:100%}
   .ai-ctl label{font-size:11px;color:var(--muted2)}
+  /* v1.7.3 一夜持股：两个开关从筛选面板移到搜索框下、漏斗上（与其他板块同款紧凑卡片） */
+  .scan-switches{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 12px}
+  .scan-sw{display:flex;align-items:center;gap:10px;background:var(--bg2,#182231);border:1px solid var(--line);
+    border-radius:9px;padding:9px 12px;min-width:0}
+  .scan-sw .nm{flex:1 1 auto;min-width:0}
+  .scan-sw .nm b{display:block;font-size:12px;font-weight:600;color:#E4EAF5}
+  .scan-sw .nm small{display:block;font-size:10px;color:var(--muted2);margin-top:2px;line-height:1.45}
+  .scan-sw-state{grid-column:1 / -1}
+  .scan-sw-state:empty,.scan-sw-state:has(.dim-state:empty){display:none}
+  @media (max-width:760px){.scan-switches{grid-template-columns:1fr;gap:8px}}
   .ai-stats{
     display:flex;gap:0;align-items:center;background:var(--panel);border:1px solid var(--line);
     border-radius:11px;padding:11px 4px;margin-bottom:14px;overflow-x:auto;
@@ -427,7 +437,8 @@
     color:#8B93A6;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
     border-radius:5px;padding:1px 5px;letter-spacing:.4px;
   }
-  .ai-card.top3 .ai-rank{color:var(--gold);background:rgba(233,185,73,.13);border-color:rgba(233,185,73,.26)}
+  /* 排名数字金色仍按名次（前三），与卡片金框（按 S/A 评级）解耦 */
+  .ai-rank.gold-rank{color:var(--gold);background:rgba(233,185,73,.13);border-color:rgba(233,185,73,.26)}
   .ai-top{display:flex;align-items:center;gap:8px;position:relative;margin-bottom:10px}
   .ai-name{font-size:15.5px;font-weight:700;letter-spacing:.3px;color:#F0F4FB;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ai-code{font-size:11px;color:var(--muted2);letter-spacing:.9px}
@@ -1047,8 +1058,10 @@
   /* 所有板块卡片共用 .sw-plan；选中态改成微微的白框，不与前三名金框混淆 */
   .ai-card.sel{border-color:rgba(255,255,255,.42);box-shadow:0 0 0 1px rgba(255,255,255,.1)}
 
-  /* 一夜持股：手机端卡片网格，PC 端保留表格 */
-  #scanGrid{display:none}
+  /* 一夜持股：v1.7.3 起与其余板块统一，PC + 手机端都用卡片网格（表格撤掉） */
+  #scanMain{grid-template-columns:1fr}          /* 左侧筛选面板已隐藏，结果区铺满 */
+  #view-scan .table-scroll{display:none}
+  #scanGrid{display:grid}
   @media (max-width:760px){
     #view-scan .table-scroll{display:none}
     #scanGrid{display:grid!important}
@@ -1095,7 +1108,7 @@
     </svg>
     <span class="lbl">选项</span><span class="auto-badge" id="autoBadge" hidden>0</span>
   </button>
-  <button class="btn primary" id="btnScan">开始扫描全部板块</button>
+  <button class="btn primary" id="btnScan">开始扫描</button>
 </header>
 
 <div class="wrap">
@@ -1121,6 +1134,16 @@
       </div>
     </div>
     <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-scan"><input class="search" id="search" placeholder="代码 / 名称 / 行业" /></div></div>
+    <div class="scan-switches">
+      <div class="scan-sw">
+        <div class="nm"><b>消息面 + 情绪面评分（仅本板块）</b><small>开启后按公告与炒作热度加分：消息面 6 分、情绪面 10 分；关闭则回到原 8 条硬条件</small></div>
+        <label class="sw"><input type="checkbox" id="dimNight" aria-label="一夜持股消息面与情绪面评分" /><i></i></label>
+      </div>
+      <div class="scan-sw">
+        <div class="nm"><b>宽松模式</b><small>关闭＝标准模式（视频原参数）；打开＝宽松模式，候选会明显变多</small></div>
+        <label class="sw"><input type="checkbox" id="presetLooseSw" aria-label="宽松模式" /><i></i></label>
+      </div>
+    </div>
     <div class="funnel" id="funnel">
       <div class="fstep"><div class="lbl">全市场主板</div><div class="val num" id="f0">—</div><div class="bar"><i style="width:100%"></i></div></div>
       <div class="fstep"><div class="lbl">① 涨幅 3~5%</div><div class="val num" id="f1">—</div><div class="bar"><i></i></div></div>
@@ -1129,9 +1152,9 @@
       <div class="fstep"><div class="lbl">④ 流通市值 50~200亿</div><div class="val num" id="f4">—</div><div class="bar"><i></i></div></div>
       <div class="fstep last"><div class="lbl">⑤~⑧ 深度入选</div><div class="val num" id="f5">—</div><div class="bar"><i></i></div></div>
     </div>
-    <div class="main">
-      <!-- 左：条件 -->
-      <aside class="card" style="position:sticky;top:78px">
+    <div class="main" id="scanMain">
+      <!-- 左：条件（v1.7.3 起界面隐藏，DOM 保留供参数读取；标准/宽松由上方开关控制） -->
+      <aside class="card" id="scanFilterPanel" style="position:sticky;top:78px;display:none">
         <div class="card-head">
           <h3>筛选条件</h3>
           <span class="hint" id="paramHint">8 条规则</span>
@@ -1191,18 +1214,6 @@
             </div>
           </div>
         </div>
-        <div class="auto-item" style="padding:11px 14px;border-top:1px solid var(--line)">
-          <div class="nm"><b>消息面 + 情绪面评分（仅本板块）</b><small>开启后按公告与炒作热度加分：消息面 6 分、情绪面 10 分；关闭则回到原 8 条硬条件</small></div>
-          <div class="ctl"><label class="sw"><input type="checkbox" id="dimNight" aria-label="一夜持股消息面与情绪面评分" /><i></i></label></div>
-        </div>
-        <div class="dim-state" id="dimNightState" style="margin:0 14px 10px"></div>
-        <div class="auto-item" style="padding:11px 14px;border-top:1px solid var(--line);border-bottom:none">
-          <div class="nm"><b>宽松模式</b><small>关闭＝标准模式（视频原参数）；打开＝宽松模式，候选会明显变多</small></div>
-          <div class="ctl"><label class="sw"><input type="checkbox" id="presetLooseSw" aria-label="宽松模式" /><i></i></label></div>
-        </div>
-        <div style="padding:10px 14px 12px">
-          <div class="saved-hint" id="saveHint"><i></i>参数已自动保存，刷新或重开都不会丢</div>
-        </div>
       </aside>
 
       <!-- 右：结果 -->
@@ -1220,7 +1231,6 @@
             <button data-g="C">C</button>
             <button data-g="D">D</button>
           </div>
-          <button class="btn sm" id="btnSave">保存本次选股</button>
         </div>
         <div class="table-scroll">
           <table>
@@ -1318,7 +1328,7 @@
 
     <div class="ai-grid" id="aiGrid"></div>
     <div class="ai-empty" id="aiEmpty">
-      点击顶部「开始扫描全部板块」。<br />
+      点击顶部「开始扫描」。<br />
       系统先从 3000+ 只主板股里按资金 + 量比 + 涨幅 + 换手做初筛，再对候选池逐只算指标和形态，大约需要 10–40 秒。
     </div>
 
@@ -1374,7 +1384,7 @@
     <div class="note" id="ztEmotion" style="margin-top:8px;display:none"></div>
     <div class="ai-grid" id="ztGrid"></div>
     <div class="ai-empty" id="ztEmpty">
-      点击顶部「开始扫描全部板块」。系统会拉取当日涨停名单、封板数据与涨停原因，<br />
+      点击顶部「开始扫描」。系统会拉取当日涨停名单、封板数据与涨停原因，<br />
       再逐只算日K位置与形态，约需 5–15 秒。
     </div>
 
@@ -1432,7 +1442,7 @@
 
     <div class="ai-grid" id="dtGrid"></div>
     <div class="ai-empty" id="dtEmpty">
-      点击顶部「开始扫描全部板块」。系统会拉取当日跌停名单、封单与开板数据，<br />
+      点击顶部「开始扫描」。系统会拉取当日跌停名单、封单与开板数据，<br />
       再逐只算日K位置与量能，约需 5–15 秒。
     </div>
 
@@ -1494,7 +1504,7 @@
 
     <div class="lt-grid" id="ldGrid"></div>
     <div class="ai-empty" id="ldEmpty">
-      点击顶部「开始扫描全部板块」。系统先扫全部行业与概念板块的资金流，<br />
+      点击顶部「开始扫描」。系统先扫全部行业与概念板块的资金流，<br />
       再拉取入选板块的主板成分股排序，大约 1–3 秒。
     </div>
 
@@ -1834,6 +1844,17 @@ function numOrDash(v, digits, unit) {
   const n = Number(v);
   return (v == null || !isFinite(n)) ? '—' : n.toFixed(digits == null ? 2 : digits) + (unit || '');
 }
+/* v1.7.3：金色边框只给 S / A 级评分股票（此前一律给排名前 3，与评级无关）。
+   评级字段统一取 x.grade；五档 S/A/B/C/D 中只有 S、A 进推荐区。 */
+function goldCls(x) {
+  const g = String((x && x.grade) || '').toUpperCase();
+  return (g === 'S' || g === 'A') ? 'top3' : '';
+}
+/* 量比：0 / 缺失都按「—」显示（涨停跌停列表补数失败时仍是 0，不伪造 0.00） */
+function vrText(v) {
+  const n = Number(v);
+  return (v == null || !isFinite(n) || n <= 0) ? '—' : n.toFixed(2);
+}
 function pctOrDash(v) {
   const n = Number(v);
   return (v == null || !isFinite(n)) ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%';
@@ -1938,6 +1959,13 @@ function toast(msg, ms = 2000) {
 }
 let overlayN = 0;   // v1.6.5：手动扫描遮罩用计数而非单布尔，避免两路扫描重叠时
                     // 先完成者提前关遮罩 / 提前退出胶囊「更新中」态
+/* v1.7.4：只更新遮罩文案/进度，不碰 overlayN 计数。
+   全板块扫描循环内用它刷新「已完成 N/5」，避免反复 setLoading(true) 把计数累加到关不掉。 */
+function setLoadText(title, sub, pct) {
+  if (title) $('#loadTitle').textContent = title;
+  if (sub) $('#loadSub').textContent = sub;
+  if (pct != null) $('#pbar').style.width = pct + '%';
+}
 function setLoading(on, title, sub, pct) {
   const o = $('#overlay');
   const cb = $('#btnCancelScan');
@@ -1950,15 +1978,13 @@ function setLoading(on, title, sub, pct) {
     overlayN--;
     if (overlayN === 0) { refreshEnd(); o.classList.remove('on'); }
   }
-  if (title) $('#loadTitle').textContent = title;
-  if (sub) $('#loadSub').textContent = sub;
-  if (pct != null) $('#pbar').style.width = pct + '%';
+  setLoadText(title, sub, pct);
 }
 
 /* 顶栏两个扫描按钮统一锁：一个板块在跑的时候别让人再点一次 */
 function lockScanBtns(on) {
   const b = $('#btnScan');
-  if (b) { b.disabled = on; b.textContent = on ? '扫描中…' : '开始扫描全部板块'; }
+  if (b) { b.disabled = on; b.textContent = on ? '扫描中…' : '开始扫描'; }
 }
 
 /* 五个板块共用同一条扫描进度浮层（就是 App 刚打开时那个）：
@@ -2224,6 +2250,7 @@ async function health(timeoutMs) {
     }
     healthFails = 0;                                   // 成功一次即恢复
     window.__svcFails = 0;
+    if (r && r.auto_exit != null) window.__autoExit = !!r.auto_exit;  // v1.7.3：PC 关页退出标志
     const m = (r && r.market) || {};
     paintHealth(m, false);
     try { syncSource(r); } catch (e) {}                // 渲染异常不误报服务异常
@@ -2252,7 +2279,24 @@ function healService() {
   svcRetryTimer = setTimeout(tick, 60);
 }
 window.__healService = healService;
-health(); setInterval(() => { if (!state.paused && !document.hidden) health(); }, 20000);
+/* v1.7.3：心跳不再因 document.hidden 停发——PC 切后台标签页时仍要维持心跳，
+   否则后端「10 分钟无心跳」兜底会把还开着的页面误判成已关闭。iOS 原生壳切后台
+   会调 __appPause 置 state.paused=true，仍会停发（省电，且 iOS 不启用自动退出）。 */
+health(); setInterval(() => { if (!state.paused) health(); }, 20000);
+
+/* v1.7.3 PC：关闭浏览器标签页后让服务自动退出。
+   平台判断只用后端的 auto_exit 标志（PC=True / iOS=False）——不能用 __appPause：
+   前端是 PC/iOS 同一份文件，__appPause 在两端都会被定义，判断会恒真、PC 永不退出。
+   pagehide 在关闭/刷新/导航离开时触发，用 sendBeacon 保证关闭瞬间也能送达；
+   后端延迟 25 秒退出，刷新后新页面 health 会取消——误关/刷新不会真的杀掉服务。 */
+window.addEventListener('pagehide', () => {
+  if (window.__autoExit !== true) return;                // 后端未开启（iOS / 未确认）就不发
+  try {
+    const base = (location.protocol + '//' + location.host);
+    if (navigator.sendBeacon) navigator.sendBeacon(base + '/api/bye', 'bye');
+    else { const img = new Image(); img.src = base + '/api/bye?t=' + Date.now(); }
+  } catch (e) {}
+});
 
 /* ------------------ 参数 ------------------ */
 function readParams() {
@@ -2422,13 +2466,17 @@ function clearBanner() {
   if (b && b.classList.contains('on')) { b.classList.remove('on'); b.classList.remove('info'); b.textContent = ''; }
 }
 
-async function scan(silent) {
+async function scan(silent, fast, extSignal) {
   // 30 秒一档，上一轮没跑完就跳过本轮，避免请求叠在一起
-  if (state.scanning) return;
+  // 返回明确的 'busy'（而非 undefined），供开关切换编排区分「被锁跳过」和「成功」。
+  if (state.scanning) return 'busy';
   const quiet = silent === true;      // 自动重扫走静默模式：不弹遮罩、不打断当前操作
+  const isFast = fast === true;       // v1.7.3：缓存快速换算（宽松开关切换那一刻）
   // 参数准备放在置锁之前：若 DOM 元素缺失抛错，锁不会被永久卡死导致以后全部扫描失效。
   const p = readParams();
-  const qs = new URLSearchParams(p).toString();
+  const _qsObj = new URLSearchParams(p);
+  if (isFast) _qsObj.set('fast', '1');   // 告诉后端只读缓存、不联网
+  const qs = _qsObj.toString();
   state.scanning = true;
   let ctl = null;                 // 主扫描也接取消：全市场逐票拉数据最耗时，不能只能干等
   if (!quiet) {
@@ -2451,9 +2499,15 @@ async function scan(silent) {
   }, 1100);
 
   try {
-    const r = await api('/api/scan?' + qs, { signal: ctl ? ctl.signal : undefined });
+    const r = await api('/api/scan?' + qs, { signal: ctl ? ctl.signal : (extSignal ? extSignal.signal : undefined) });
     clearInterval(timer);
     if (!r.ok) throw new Error(r.error || '扫描失败');
+    // v1.7.3 fast：缓存不足就不拿空/子集冒充榜单，交给编排函数直接走完整扫描
+    if (isFast && r.insufficient) { state.scanning = false; return 'insufficient'; }
+    if (isFast) {
+      (r.list || []).forEach(x => { x._fast = true; });   // 卡片角标「缓存换算」
+      state.scanFast = r;
+    }
     state.data = r;
     dimFoldAll();                 // 新响应先按本地开关校正，避免后端口径覆盖（含自动重扫）
     state.scanError = null;
@@ -2465,7 +2519,10 @@ async function scan(silent) {
     const sm = (r.params && r.params.score_min) != null ? r.params.score_min : p.score_min;
     // 与表格 / countPill 一致：叠加股价筛选后统一算入选数
     const n = (r.list || []).filter(x => gateScore(x) >= sm && inPF(x)).length;
-    if (quiet) {
+    if (isFast) {
+      toast(`快速换算完成 · 命中缓存 ${r.cache_hit}/${r.cache_pool} 只 · 正在按完整口径复核…`);
+      state.lastPickCount = n;
+    } else if (quiet) {
       // 静默刷新只在结果数量变化时轻提示一下；没停在这个板块就不打扰
       if (state.view === 'scan' && state.lastPickCount !== undefined && state.lastPickCount !== n) {
         toast(`自动重扫：入选 ${n} 只（原 ${state.lastPickCount} 只）`);
@@ -2480,7 +2537,7 @@ async function scan(silent) {
     return true;                 // 供 autoTick 判断本轮成功
   } catch (e) {
     clearInterval(timer);
-    if (ctl && ctl.signal.aborted) return false;   // 用户主动取消：不打失败横幅
+    if ((ctl && ctl.signal.aborted) || (extSignal && extSignal.signal.aborted)) return false;   // 用户主动取消：不打失败横幅
     state.scanError = e.message || '接口异常';
     if (!state.data) renderTable();   // 空状态切到「扫描失败」
     if (!quiet || state.view === 'scan') {
@@ -2608,7 +2665,7 @@ function renderScanCards(arr) {
     const sub = !d && state.scanError ? '数据获取失败，请检查网络后点「开始扫描」重试。'
       : !d ? '点击「开始扫描」，按 8 条规则逐层过滤，再对候选股做 K 线与分时深度打分。'
       : '可以适当放宽条件，或调整股价筛选区间。' + (pfEmptyNote() || '');
-    grid.innerHTML = `<div class="ai-empty" style="padding:36px 18px"><b style="color:#CBD5E5;font-size:13px">${esc(big)}</b><br />${sub}</div>`;
+    grid.innerHTML = `<div class="ai-empty" style="grid-column:1/-1;padding:36px 18px"><b style="color:#CBD5E5;font-size:13px">${esc(big)}</b><br />${sub}</div>`;
     return;
   }
   const RK = ['gain', 'vr', 'turnover', 'volume', 'ma', 'intraday'];
@@ -2620,12 +2677,13 @@ function renderScanCards(arr) {
     }).join('');
     const rs = (x.reasons && x.reasons.length ? x.reasons : (x.tags || [])).slice(0, 3)
       .map((t, k) => `<li><i>${k + 1}</i><span>${esc(t)}</span></li>`).join('');
-    return `<article class="ai-card ${i < 3 ? 'top3' : ''} ${state.selected === x.code ? 'sel' : ''}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、分时与八条规则打分">
+    return `<article class="ai-card ${goldCls(x)} ${state.selected === x.code ? 'sel' : ''}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、分时与八条规则打分">
       <div class="ai-top">
-        <span class="ai-rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
         <span class="ai-code">${esc(x.code)}</span>
         ${buyBadgeHtml(x)}
+        ${x._fast ? '<span class="ai-flag" title="用上次扫描已缓存的日K/分时快速换算，完整复核后自动替换">缓存换算</span>' : ''}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
       ${dimBadges(x)}
@@ -3428,12 +3486,11 @@ function syncQuoteStats(d, item) {
   // 列表批量源被限流回退新浪时会缺主力净额，这里失败仍显示「—」，不伪造 0。
   const ex = d && d.extra;
   if (ex && item) {
-    if (item.mode !== 'zt' && item.mode !== 'dt') {
-      const vr = Number(ex.volratio);
-      if (ex.volratio != null && isFinite(vr) && vr > 0) {
-        item.volratio = vr;
-        const e = $('#dVr'); if (e) e.textContent = vr.toFixed(2);
-      }
+    // v1.7.3：涨停 / 跌停详情同样补齐真实量比（此前被刻意留了例外）。
+    const vr = Number(ex.volratio);
+    if (ex.volratio != null && isFinite(vr) && vr > 0) {
+      item.volratio = vr;
+      const e = $('#dVr'); if (e) e.textContent = vr.toFixed(2);
     }
     const nv = Number(ex.main_net);
     if (ex.main_net != null && isFinite(nv)) {
@@ -3607,7 +3664,7 @@ async function openDetail(code, market) {
     dBadge.textContent = ok ? '推荐买入' : '不推荐买入';
     dBadge.className = 'buy-badge ' + (ok ? 'yes' : 'no');
   }
-  $('#dVr').textContent = (item.mode === 'zt' || item.mode === 'dt') ? '—' : numOrDash(item.volratio, 2);
+  $('#dVr').textContent = numOrDash(item.volratio, 2);
   $('#dTurn').textContent = numOrDash(item.turnover, 2, '%');
   $('#dFcap').textContent = numOrDash(item.fcap, 0, '亿');
   if (netKnown(item)) {
@@ -4248,12 +4305,44 @@ function applyPreset(kind) {
   saveSettings(true);
   toast(kind === 'std' ? '已切换到标准模式（视频原参数）' : '已切换到宽松模式，候选会明显变多');
 }
-/* v1.7.3：标准/宽松合并为「宽松模式」开关——关＝std，开＝loose，默认关 */
+/* v1.7.3：标准/宽松合并为「宽松模式」开关——关＝std，开＝loose，默认关。
+   切换后自动重扫，机制对齐 AI 荐股：先用缓存快速换算秒出榜单（带「缓存换算」角标），
+   随后自动跑一次完整口径复核替换；缓存不足则直接完整扫描。token 防止快速连拨时旧结果覆盖新结果。 */
+let presetScanToken = 0;
+let presetScanChain = Promise.resolve();       // 串行队列：一组「fast→full」跑完再跑下一组，避免并发抢占 scanning 锁
+function scanPresetSwitch() {
+  const token = ++presetScanToken;
+  presetScanChain = presetScanChain.catch(() => {}).then(async () => {
+    if (token !== presetScanToken) return;     // 排在后面时已被更新的拨动作废，整组跳过
+    // ① 先试缓存快速换算（不联网）
+    let fastResult;
+    try { fastResult = await scan(true, true); } catch (e) { fastResult = null; }
+    if (token !== presetScanToken) return;
+    // 'busy'=别的扫描正占用锁、'insufficient'=缓存不足：都不算 fast 已应用，直接走完整扫描
+    const fastApplied = fastResult && fastResult !== 'insufficient' && fastResult !== 'busy';
+    if (fastApplied) {
+      await new Promise(r => setTimeout(r, 350));   // 让「缓存换算」榜单短暂可见
+      if (token !== presetScanToken) return;
+    }
+    // ② 完整口径复核（静默，替换 fast 子集）。若仍被自动重扫占锁，短暂重试几次。
+    for (let i = 0; i < 4 && token === presetScanToken; i++) {
+      let full;
+      try { full = await scan(true); } catch (e) { break; }
+      if (full !== 'busy') break;                // 真正跑了一次完整扫描
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  });
+  return presetScanChain;
+}
 const presetLooseSw = $('#presetLooseSw');
-if (presetLooseSw) presetLooseSw.addEventListener('change', () => applyPreset(presetLooseSw.checked ? 'loose' : 'std'));
+if (presetLooseSw) presetLooseSw.addEventListener('change', () => {
+  applyPreset(presetLooseSw.checked ? 'loose' : 'std');
+  scanPresetSwitch();
+});
 
-/* ------------------ 保存 ------------------ */
-$('#btnSave').onclick = async () => {
+/* ------------------ 保存（v1.7.3 起按钮已从界面移除，逻辑保留供将来复用） ------------------ */
+const btnSaveEl = $('#btnSave');
+if (btnSaveEl) btnSaveEl.onclick = async () => {
   if (!state.data) return toast('先扫描一次再保存');
   try {
     const sm = readParams().score_min;               // 后端按这个门槛过滤，不再硬编码 60
@@ -5357,9 +5446,9 @@ function renderAI() {
       return `<i style="background:${has ? dimColor(v) : '#3A4356'}" title="${esc(label)} ${has ? esc(v) + ' 分' : '—'}"></i>`;
     }).join('');
     const rs = (x.reasons || []).slice(0, 3).map((t, k) => `<li><i>${k + 1}</i><span>${esc(t)}</span></li>`).join('');
-    return `<article class="ai-card ${i < 3 ? 'top3' : ''}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、分时与六维打分">
+    return `<article class="ai-card ${goldCls(x)}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、分时与六维打分">
       <div class="ai-top">
-        <span class="ai-rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
         <span class="ai-code">${esc(x.code)}</span>
         ${buyBadgeHtml(x)}
@@ -5414,9 +5503,9 @@ function renderSearch() {
       return `<i style="background:${has ? dimColor(+raw) : '#3A4356'}" title="${esc(label)} ${has ? esc(raw) + ' 分' : '—'}"></i>`;
     }).join('');
     const rs = (x.reasons || []).slice(0, 3).map((t, k) => `<li><i>${k + 1}</i><span>${esc(t)}</span></li>`).join('');
-    return `<article class="ai-card ${i < 3 ? 'top3' : ''}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、分时与六维打分">
+    return `<article class="ai-card ${goldCls(x)}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、分时与六维打分">
       <div class="ai-top">
-        <span class="ai-rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
         <span class="ai-code">${esc(x.code)}</span>
         ${buyBadgeHtml(x)}
@@ -5636,7 +5725,7 @@ if ($('#aiSwingChk')) {
   });
 }
 
-async function runAI(silent) {
+async function runAI(silent, extSignal) {
   if (state.aiLoading) return;
   state.aiLoading = true;
   const quiet = silent === true;            // 自动重扫：不动按钮、不弹遮罩
@@ -5662,7 +5751,7 @@ async function runAI(silent) {
       top: $('#aiTop').value,
     });
     if (aiUseSwing()) qs.set('algo', 'swing');   // 仅本次 AI 荐股请求切到多日持股算法
-    const r = await api('/api/ai_pick?' + qs, prog ? { signal: prog.signal } : {});
+    const r = await api('/api/ai_pick?' + qs, prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || r.ok === false) throw new Error((r && r.error) || '接口返回异常');
     (r.list || []).forEach(x => { delete x._fast; delete x._new; });   // 手动/自动重扫：去掉旧角标
     if (aiUseSwing()) state.aiSwingFull = r; else state.aiNormal = r;
@@ -5693,8 +5782,8 @@ async function runAI(silent) {
     // apiFetch 超时也抛 AbortError（内部 setTimeout abort），不能只按异常名判「用户取消」：
     // 慢网/安卓冷扫首扫可能超 180s，误判成取消会静默吞掉、面板空白且不恢复空状态。
     // 与主扫描 scan() 同口径：按外部取消 signal 是否真的 aborted 来区分。
-    const canceled = e && (e.name === 'AbortError') && prog && prog.signal.aborted;
-    if (quiet) { if (state.view === 'ai') toast('AI 自动重扫失败，下个周期再试', 2200); }
+    const canceled = e && (e.name === 'AbortError') && ((prog && prog.signal.aborted) || (extSignal && extSignal.signal.aborted));
+    if (quiet) { if (!canceled && state.view === 'ai') toast('AI 自动重扫失败，下个周期再试', 2200); }
     else if (canceled) {
       // 用户主动取消：不算失败，不弹「限流」，保留上一次结果
       if (!state.ai) $('#aiEmpty').style.display = '';
@@ -5785,7 +5874,7 @@ function renderZT() {
   empty.style.display = list.length ? 'none' : '';
   if (!list.length) {
     empty.innerHTML = state.ztFilter === 'all'
-      ? `当日没有取到主板涨停股。可能是非交易日、接口临时限流，或今天涨停的都是创业板 / 科创板。<br />点顶部「开始扫描全部板块」再试一次。` + pfEmptyNote()
+      ? `当日没有取到主板涨停股。可能是非交易日、接口临时限流，或今天涨停的都是创业板 / 科创板。<br />点顶部「开始扫描」再试一次。` + pfEmptyNote()
       : `当前筛选下没有标的。切到「全部」看看，或换一天再看。` + pfEmptyNote();
     return;
   }
@@ -5811,9 +5900,9 @@ function renderZT() {
       return `<i style="background:${has ? dimColor(v) : '#3A4356'}" title="${esc(label)} ${has ? esc(v) + ' 分' : '—'}"></i>`;
     }).join('');
     const rs = (x.reasons || []).slice(0, 3).map((t, k) => `<li><i>${k + 1}</i><span>${esc(t)}</span></li>`).join('');
-    return `<article class="ai-card ${i < 3 ? 'top3' : ''}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、筹码峰与涨停打分">
+    return `<article class="ai-card ${goldCls(x)}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、筹码峰与涨停打分">
       <div class="ai-top">
-        <span class="ai-rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
         <span class="ai-code">${esc(x.code)}</span>
         ${buyBadgeHtml(x)}
@@ -5823,6 +5912,7 @@ function renderZT() {
         <span class="zt-badge ${esc(x.action)}">${esc(x.action_txt)}</span>
         <span class="zt-chip">${x.boards <= 1 ? '首板' : esc(x.boards) + ' 连板'}</span>
         <span class="zt-chip">换手 ${numOrDash(x.turnover, 1, '%')}</span>
+        <span class="zt-chip">量比 ${vrText(x.volratio)}</span>
         <span class="zt-chip">封单 ${numOrDash(x.seal_amount, 2, ' 亿')}</span>
         ${x.seal_amt_ratio != null ? `<span class="zt-chip" title="封单额 / 当日成交额">封成比 ${esc(x.seal_amt_ratio)}</span>` : ''}
         ${x.open_num ? `<span class="zt-chip">开板 ${esc(x.open_num)} 次</span>` : '<span class="zt-chip">未开板</span>'}
@@ -5852,7 +5942,7 @@ function renderZT() {
   });
 }
 
-async function runZT(silent) {
+async function runZT(silent, extSignal) {
   if (state.ztdLoading) return;
   state.ztdLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
@@ -5872,7 +5962,7 @@ async function runZT(silent) {
     setMeta('zt', '分析中', sec + 's');
   }, quiet ? 2000 : 500);
   try {
-    const r = await api('/api/limit_up', prog ? { signal: prog.signal } : {});
+    const r = await api('/api/limit_up', prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || !r.ok) throw new Error((r && r.error) || '获取失败');
     state.ztd = r;
     dimFoldAll();                 // 新响应先按本地开关校正，避免后端口径覆盖（含自动重扫）
@@ -5903,8 +5993,8 @@ async function runZT(silent) {
     return true;
   } catch (e) {
     // 取消按钮 abort 会抛 AbortError：不算失败、不弹限流提示，保留上次结果
-    const canceled = e && (e.name === 'AbortError') && prog && prog.signal.aborted;
-    if (quiet) { if (state.view === 'zt') toast('涨停池自动刷新失败，下个周期再试', 2200); }
+    const canceled = e && (e.name === 'AbortError') && ((prog && prog.signal.aborted) || (extSignal && extSignal.signal.aborted));
+    if (quiet) { if (!canceled && state.view === 'zt') toast('涨停池自动刷新失败，下个周期再试', 2200); }
     else if (canceled) {
       if (!state.ztd) $('#ztEmpty').style.display = '';
     } else {
@@ -5951,7 +6041,7 @@ function renderDT() {
   empty.style.display = list.length ? 'none' : '';
   if (!list.length) {
     empty.innerHTML = state.dtFilter === 'all'
-      ? `当日没有取到主板跌停股。可能是非交易日、接口临时限流，或今天跌停的都是创业板 / 科创板。<br />点顶部「开始扫描全部板块」再试一次。` + pfEmptyNote()
+      ? `当日没有取到主板跌停股。可能是非交易日、接口临时限流，或今天跌停的都是创业板 / 科创板。<br />点顶部「开始扫描」再试一次。` + pfEmptyNote()
       : `当前筛选下没有标的。切到「全部」看看，或换一天再看。` + pfEmptyNote();
     return;
   }
@@ -5979,9 +6069,9 @@ function renderDT() {
       return `<i style="background:${has ? dimColor(v) : '#3A4356'}" title="${esc(label)} ${has ? esc(v) + ' 分' : '—'}"></i>`;
     }).join('');
     const rs = (x.reasons || []).slice(0, 3).map((t, k) => `<li><i>${k + 1}</i><span>${esc(t)}</span></li>`).join('');
-    return `<article class="ai-card ${i < 3 ? 'top3' : ''}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、筹码峰与跌停打分">
+    return `<article class="ai-card ${goldCls(x)}" data-code="${esc(x.code)}" data-market="${esc(x.market)}" title="点击查看 K 线、筹码峰与跌停打分">
       <div class="ai-top">
-        <span class="ai-rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
         <span class="ai-code">${esc(x.code)}</span>
         ${buyBadgeHtml(x)}
@@ -5990,6 +6080,7 @@ function renderDT() {
       <div class="zt-tags">
         <span class="zt-badge ${esc(dtGrp(x))}">${esc(x.action_txt)}</span>
         ${x.window ? `<span class="zt-chip">${esc(x.window)}</span>` : ''}
+        <span class="zt-chip">量比 ${vrText(x.volratio)}</span>
         <span class="zt-chip">封单 ${esc(sealTxt(x.seal_amount))}</span>
         ${x.seal_amt_ratio != null ? `<span class="zt-chip" title="封单额 / 当日成交额">封成比 ${esc(x.seal_amt_ratio)}</span>` : ''}
         <span class="zt-chip">开板 ${esc(x.open_num)} 次</span>
@@ -6020,7 +6111,7 @@ function renderDT() {
   });
 }
 
-async function runDT(silent) {
+async function runDT(silent, extSignal) {
   if (state.dtdLoading) return;
   state.dtdLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
@@ -6040,7 +6131,7 @@ async function runDT(silent) {
     setMeta('dt', '分析中', sec + 's');
   }, quiet ? 2000 : 500);
   try {
-    const r = await api('/api/limit_down', prog ? { signal: prog.signal } : {});
+    const r = await api('/api/limit_down', prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || !r.ok) throw new Error((r && r.error) || '获取失败');
     state.dtd = r;
     dimFoldAll();                 // 新响应先按本地开关校正，避免后端口径覆盖（含自动重扫）
@@ -6073,8 +6164,8 @@ async function runDT(silent) {
     return true;
   } catch (e) {
     // 取消按钮 abort 会抛 AbortError：不算失败、不弹限流提示，保留上次结果
-    const canceled = e && (e.name === 'AbortError') && prog && prog.signal.aborted;
-    if (quiet) { if (state.view === 'dt') toast('跌停池自动刷新失败，下个周期再试', 2200); }
+    const canceled = e && (e.name === 'AbortError') && ((prog && prog.signal.aborted) || (extSignal && extSignal.signal.aborted));
+    if (quiet) { if (!canceled && state.view === 'dt') toast('跌停池自动刷新失败，下个周期再试', 2200); }
     else if (canceled) {
       if (!state.dtd) $('#dtEmpty').style.display = '';
     } else {
@@ -6170,7 +6261,7 @@ function renderLD() {
   });
 }
 
-async function runLD(silent) {
+async function runLD(silent, extSignal) {
   if (state.ldLoading) return;
   state.ldLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
@@ -6190,7 +6281,7 @@ async function runLD(silent) {
   }, quiet ? 2000 : 500);
   try {
     const qs = new URLSearchParams({ boards: $('#ldBoards').value, follow: $('#ldFollow').value });
-    const r = await api('/api/leader?' + qs.toString(), prog ? { signal: prog.signal } : {});
+    const r = await api('/api/leader?' + qs.toString(), prog ? { signal: prog.signal } : (extSignal ? { signal: extSignal.signal } : {}));
     if (!r || !r.ok) throw new Error((r && r.error) || '获取失败');
     state.ldd = r;
     syncSource(r);
@@ -6212,8 +6303,8 @@ async function runLD(silent) {
     }
     return true;
   } catch (e) {
-    const canceled = e && (e.name === 'AbortError') && prog && prog.signal.aborted;
-    if (quiet) { if (state.view === 'ld') toast('龙头榜自动刷新失败，下个周期再试', 2200); }
+    const canceled = e && (e.name === 'AbortError') && ((prog && prog.signal.aborted) || (extSignal && extSignal.signal.aborted));
+    if (quiet) { if (!canceled && state.view === 'ld') toast('龙头榜自动刷新失败，下个周期再试', 2200); }
     else if (canceled) {
       if (!state.ldd) $('#ldEmpty').style.display = '';
     } else {
@@ -6312,38 +6403,56 @@ const isPhone = () => window.matchMedia('(max-width:760px)').matches;
 /* v1.7.3：顶栏「开始扫描」对全部板块生效——点一下，五个分析板块一起刷新。
    各板块刷新函数用 silent=true 静默调用（不动自己的按钮/遮罩），由这里统一锁按钮、统一进度提示。 */
 const ALL_VIEW_RUN = [
-  ['一夜持股', () => scan(true)],
-  ['AI 荐股', () => runAI(true)],
-  ['涨停分析', () => runZT(true)],
-  ['跌停分析', () => runDT(true)],
-  ['龙头分析', () => runLD(true)]
+  ['一夜持股', (sig) => scan(true, false, sig)],
+  ['AI 荐股', (sig) => runAI(true, sig)],
+  ['涨停分析', (sig) => runZT(true, sig)],
+  ['跌停分析', (sig) => runDT(true, sig)],
+  ['龙头分析', (sig) => runLD(true, sig)]
 ];
 let scanAllRunning = false;
 async function runAll() {
   if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
   scanAllRunning = true;
   lockScanBtns(true);
+  // v1.7.4：全板块扫描接取消控制器，并把「取消本次扫描」按钮显示出来。
+  // 五个板块都以静默模式跑（各自不碰遮罩/按钮），由这里统一接一个 signal。
+  const allCtl = new AbortController();
+  scanAbort = allCtl;
   setLoading(true, '正在刷新全部板块…', '依次扫描一夜持股 / AI / 涨停 / 跌停 / 龙头', 20);
-  const started = Date.now();
+  const cb = $('#btnCancelScan'); if (cb) cb.style.display = '';   // 这次可取消
   const steps = [18, 40, 62, 82, 92];
-  let i = 0;
+  let i = 0, canceled = false;
   try {
     for (const [name, fn] of ALL_VIEW_RUN) {
-      try { await fn(); } catch (e) { /* 单板块失败不影响其余板块 */ }
+      if (allCtl.signal.aborted) { canceled = true; break; }        // 取消：跳过剩余板块
+      try { await fn(allCtl); } catch (e) { /* 单板块失败不影响其余板块 */ }
       i += 1;
-      setLoading(true, '正在刷新全部板块…', `已完成 ${name}（${i}/5）`, steps[Math.min(i - 1, steps.length - 1)]);
+      // 只更新文案/进度，绝不再 setLoading(true)——否则 overlayN 累加到关不掉（卡在「全部完成」）
+      if (allCtl.signal.aborted) { canceled = true; break; }
+      setLoadText('正在刷新全部板块…', `已完成 ${name}（${i}/5）`, steps[Math.min(i - 1, steps.length - 1)]);
     }
-    setLoading(true, '正在刷新全部板块…', '全部完成', 100);
-    setTimeout(() => setLoading(false), 500);
-    toast('五个板块已全部刷新', 2200);
+    if (canceled) {
+      setLoadText('已取消', '本次全板块扫描已取消，未完成的板块保留上次结果', 100);
+      toast('已取消本次扫描', 1800);
+    } else {
+      setLoadText('正在刷新全部板块…', '全部完成', 100);
+      toast('五个板块已全部刷新', 2200);
+    }
   } finally {
+    if (scanAbort === allCtl) scanAbort = null;   // 谁建谁清，不误伤别的扫描控制器
+    // 无论成功/失败/取消都只在这里关一次遮罩，overlayN 严格配对，不会卡住
+    setTimeout(() => setLoading(false), canceled ? 200 : 500);
     scanAllRunning = false;
     lockScanBtns(false);
   }
 }
+/* v1.7.4：顶栏按钮恒定「开始扫描」，每次点击都扫全部板块。
+   实测：缓存热时全板块 5 个接口串行合计仅约 1.3s，与单板块（0.02~0.5s）差距极小，
+   只有冷启动首扫一夜持股约 18s——那一次本就该全扫备数据。故不做「首次全板块 / 之后当前板块」分发，
+   保持逻辑最简单；按钮文案固定，等待浮层文案随板块进度变化即可。 */
 function runCurrent() { return runAll(); }
 $('#btnScan').onclick = runCurrent;
-$('#btnScan').title = '刷新全部板块（一夜持股 / AI / 涨停 / 跌停 / 龙头）';
+$('#btnScan').title = '扫描全部板块（一夜持股 / AI / 涨停 / 跌停 / 龙头）';
 (async () => {
   renderScanCards([]);       // 手机端先落一个「尚未扫描」的卡片空态
   await loadSettings();      // 先把上次保存的参数恢复，再按这份参数扫描

@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.3"
+VERSION = "1.7.4"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -4038,6 +4038,7 @@ def swing_pick(params):
 # 快速换算只认 30 分钟内的日K缓存：日线级别指标对几分钟的延迟不敏感，
 # 但也不能无限期用旧数据，否则停牌/除权的票会拿错价格。
 FAST_KLINE_MAX_AGE = 1800
+FAST_TD_MAX_AGE = 180          # 快换算时个股/上证分时缓存容忍时长（正常 ttl=60，留余量给后台节流）
 
 
 def swing_pick_fast(params):
@@ -4530,6 +4531,14 @@ def limit_analysis(params):
     hit = [x for x in results if x["score"] >= p["min_score"]]
     top = hit[: int(p["top"])]
 
+    # v1.7.3：涨停列表此前把 volratio 写死为 0，卡片/详情量比缺失。
+    # 用腾讯批量源（与全市场扫描同源）补真实量比；取不到仍留 0，前端按「—」显示。
+    if top:
+        try:
+            top, _ = enrich_volratio(top)
+        except Exception:
+            pass
+
     buckets = {"overnight": 0, "intraday": 0, "avoid": 0}
     for x in top:
         buckets[x["action"]] = buckets.get(x["action"], 0) + 1
@@ -4987,6 +4996,14 @@ def limit_down_analysis(params):
     hit = [x for x in results if x["score"] >= p["min_score"]]
     top = hit[: int(p["top"])]
 
+    # v1.7.3：跌停列表此前把 volratio 写死为 0，卡片/详情量比缺失。
+    # 用腾讯批量源（与全市场扫描同源）补真实量比；取不到仍留 0，前端按「—」显示。
+    if top:
+        try:
+            top, _ = enrich_volratio(top)
+        except Exception:
+            pass
+
     buckets = {"intraday": 0, "ditian": 0, "close": 0, "avoid": 0}
     by_action = {"ditian": 0, "rebound": 0, "avoid": 0}
     for x in top:
@@ -5409,7 +5426,11 @@ def is_bad_name(name, exclude_st):
     return False
 
 
-def scan(params):
+def scan(params, fast=False):
+    """一夜持股扫描。fast=True 为「缓存快速换算」：只用已缓存的日K/分时重算，
+    全程不额外联网，1~3 秒出榜单，供宽松模式开关切换那一刻秒出结果；
+    结果标注 fast/partial，前端随后自动跑一次完整口径复核来替换。
+    缓存命中太少返回 insufficient=True，由前端直接走完整扫描。"""
     t0 = time.time()
     p = dict(DEFAULTS)
     for k, v in (params or {}).items():
@@ -5431,7 +5452,10 @@ def scan(params):
     # 个股分时缺失一起走「过半→整批空 + 明确提醒」的统一口径（单次抖动不误杀）。
     idx_tr = None
     try:
-        _idx = fetch_trends("000001", 1, ttl=60)
+        if fast:
+            _idx = cache_peek("t:1:000001", FAST_TD_MAX_AGE)
+        else:
+            _idx = fetch_trends("000001", 1, ttl=60)
         if _idx and len(_idx.get("points") or []) >= 20:
             idx_tr = _idx
     except Exception:
@@ -5461,7 +5485,8 @@ def scan(params):
           f"{p['gain_min']}% ~ {p['gain_max']}%，剔除ST/停牌")
 
     # ② 量比（备用源缺该字段时，用腾讯批量行情补齐）
-    if any(not q["volratio"] for q in s1):
+    # fast 模式不联网：缺量比的票直接进不了 ③（viewratio>=min 过滤），是 partial 的一部分。
+    if (not fast) and any(not q["volratio"] for q in s1):
         s1, filled = enrich_volratio(s1)
         if filled:
             source += "+腾讯"
@@ -5491,15 +5516,24 @@ def scan(params):
 
     def work(q):
         try:
-            bars = fetch_kline(q["code"], q["market"], 160, q.get("name", ""))
-            if len(bars) < 25:
-                return None
+            if fast:
+                # 只读缓存、绝不联网：没有日K或分时缓存的票跳过，交给「完整复核」补上
+                bars = cache_peek(f"k:{q['market']}:{q['code']}", FAST_KLINE_MAX_AGE)
+                if not bars or len(bars) < 25:
+                    return ("__miss__",)
+                tr = cache_peek(f"t:{q['market']}:{q['code']}", FAST_TD_MAX_AGE)
+                if not tr or not (tr.get("points") or []):
+                    return ("__miss__",)
+            else:
+                bars = fetch_kline(q["code"], q["market"], 160, q.get("name", ""))
+                if len(bars) < 25:
+                    return None
+                try:
+                    tr = fetch_trends(q["code"], q["market"])
+                except Exception:
+                    tr = None
             # v1.6.4：分时数据缺失不再降级中性分——与跑赢上证一样属硬门槛，
             # 缺失/不达标都不入选（gate.block 给出原因）。
-            try:
-                tr = fetch_trends(q["code"], q["market"])
-            except Exception:
-                tr = None
             ev = evaluate(q, bars, tr, p, idx_tr)
             block = (ev.get("gate") or {}).get("block")
             if block:                       # 硬门槛拦截，不进 final
@@ -5509,20 +5543,39 @@ def scan(params):
         except Exception:
             return None
 
+    cache_miss = 0
     with ThreadPoolExecutor(max_workers=_wn(10)) as ex:
         for r in ex.map(work, cand):
             if isinstance(r, tuple) and r and r[0] == "__gate__":
                 gate_stats[r[1]] = gate_stats.get(r[1], 0) + 1
+            elif isinstance(r, tuple) and r and r[0] == "__miss__":
+                cache_miss += 1
             elif r is None:
                 errors += 1
             else:
                 results.append(r)
 
+    # v1.7.3 fast：缓存命中太少（刚启动 / 缓存过期 / 换了参数候选池变了）就不拿
+    # 子集冒充榜单，返回 insufficient 让前端直接走完整扫描。
+    if fast:
+        cache_hit = len(results)
+        if cache_hit < 3 or (cand and cache_hit < len(cand) * 0.25):
+            return {
+                "ok": True, "mode": "scan", "fast": True, "insufficient": True,
+                "cache_hit": cache_hit, "cache_pool": len(cand),
+                "source": source, **snap_meta(snap_pack),
+                "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+                "market": market_status(), "params": p,
+                "funnel": funnel, "list": [], "elapsed": round(time.time() - t0, 1),
+                "note": "缓存不足，直接按完整口径扫描。",
+            }
+
     # 数据大面积缺失（过半候选因分时/上证缺失被拦）：数据源故障，整批空 + 明确提醒，
     # 而不是给一个空榜让人以为是「今天没票」。单次抖动只影响个别票，不触发整批。
     miss_stock = gate_stats.get("分时数据缺失", 0)
     miss_idx = gate_stats.get("上证分时数据缺失", 0)
-    if cand and (miss_stock + miss_idx) > len(cand) / 2:
+    # fast 模式不走「数据源故障整批空」：缺缓存属预期，已由上面的 insufficient 处理。
+    if (not fast) and cand and (miss_stock + miss_idx) > len(cand) / 2:
         detail = []
         if miss_idx:
             detail.append(f"上证分时缺失影响 {miss_idx}/{len(cand)} 只")
@@ -5565,6 +5618,13 @@ def scan(params):
             "buy_ok": not (r.get("high") == r.get("open") and r.get("pct", 0) >= 9.8),
         })
 
+    _fast_meta = {}
+    if fast:
+        _fast_meta = {
+            "fast": True, "partial": True, "cache_hit": len(results), "cache_pool": len(cand),
+            "note": f"快速换算：用上次扫描已缓存的日K/分时（命中 {len(results)}/{len(cand)} 只）按同一口径重算，"
+                    "未额外联网，完整口径复核随后自动进行。",
+        }
     return {
         "ok": True,
         "source": source, **snap_meta(snap_pack),
@@ -5579,6 +5639,7 @@ def scan(params):
         "deep_count": len(cand),
         "errors": errors,
         "elapsed": round(time.time() - t0, 1),
+        **_fast_meta,
         "grade_s": sum(1 for x in slim if x["grade"] == "S" and x["score"] >= p["score_min"]),
         "grade_a": sum(1 for x in slim if x["grade"] == "A" and x["score"] >= p["score_min"]),
         "grade_b": sum(1 for x in slim if x["grade"] == "B" and x["score"] >= p["score_min"]),
@@ -7332,15 +7393,23 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
 
             if path == "/api/health":
+                note_beat()   # v1.7.3：心跳刷新活跃时间，取消待执行的自动退出
                 return self._json({"ok": True, "version": VERSION, "market": market_status(),
+                                   "auto_exit": not LIGHT,   # PC=True：前端据此注册关页退出
                                    "server_time": now_cn().strftime("%Y-%m-%d %H:%M:%S")})
+
+            if path == "/api/bye":   # sendBeacon 不可用时的 GET 兜底
+                schedule_bye_exit()
+                return self._json({"ok": True})
 
             if path == "/api/announce":
                 return self._json(announce_check(qs.get("codes", [""])[0]))
 
             if path == "/api/scan":
                 params = {k: v[0] for k, v in qs.items()}
-                return self._json(scan(params))
+                # v1.7.3：fast=1 用已缓存的日K/分时快速换算（宽松开关切换那一刻秒出）
+                _fast = str(params.pop("fast", "0")) in ("1", "true", "yes")
+                return self._json(scan(params, fast=_fast))
 
             if path == "/api/ai_pick":
                 params = {k: v[0] for k, v in qs.items()}
@@ -7544,6 +7613,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        # v1.7.3：关页退出信号用 sendBeacon 发（body 非 JSON），须在 JSON 解析前处理
+        if u.path == "/api/bye":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > 0:
+                    self.rfile.read(n)
+            except Exception:
+                pass
+            schedule_bye_exit()
+            return self._json({"ok": True})
         try:
             length = int(self.headers.get("Content-Length") or 0)
             if length < 0 or length > 4 * 1024 * 1024:
@@ -7616,6 +7695,80 @@ def find_running():
     return None
 
 
+# ---------------------------------------------------------------------------
+# v1.7.3 PC 端：关闭浏览器页面后服务自动退出（iOS 原生壳不受影响）
+#   - 前端在 pagehide 时用 sendBeacon 调 /api/bye；后端延迟几秒退出，
+#     给「刷新 / 误关」留反悔窗口：期间任何心跳都会取消待退出。
+#   - 兜底：PC 模式连续 AUTO_EXIT_SEC 秒收不到任何心跳（浏览器崩溃没发 bye）
+#     也自动退出，避免进程残留。_last_beat 在每次 /api/health 时刷新。
+#   - iOS（LIGHT=1，原生壳内嵌服务）不启用：原生壳的生命周期由 SceneDelegate 管。
+# ---------------------------------------------------------------------------
+_srv_ref = [None]          # 全局服务实例，退出函数要调它的 shutdown
+_last_beat = [time.time()] # 最近一次心跳时间
+_bye_timer = [None]        # 待执行的退出 Timer（心跳可取消）
+AUTO_EXIT_SEC = 600        # 无心跳兜底退出：10 分钟（浏览器崩溃残留才用到，容得下后台节流）
+BYE_DELAY_SEC = 25         # /api/bye 后延迟：> 心跳间隔 20s，确保其它还开着的标签能发心跳反悔
+
+
+def note_beat():
+    """收到心跳：刷新活跃时间，并取消任何待执行的退出（反悔）。"""
+    _last_beat[0] = time.time()
+    t = _bye_timer[0]
+    if t is not None:
+        try:
+            t.cancel()
+        except Exception:
+            pass
+        _bye_timer[0] = None
+
+
+def _do_auto_exit(reason):
+    """真正退出服务：从独立线程调用 shutdown，避免阻塞自己。"""
+    print(f"[auto-exit] {reason}，服务自动退出")
+    srv = _srv_ref[0]
+    try:
+        if srv is not None:
+            threading.Thread(target=srv.shutdown, daemon=True).start()
+        else:
+            os._exit(0)
+    except Exception:
+        os._exit(0)
+
+
+def schedule_bye_exit():
+    """收到 /api/bye：延迟 BYE_DELAY_SEC 秒退出；期间心跳会取消。"""
+    if LIGHT:                # iOS 原生壳不自动退出
+        return
+    t = _bye_timer[0]
+    if t is not None:
+        try:
+            t.cancel()
+        except Exception:
+            pass
+
+    def fire():
+        _bye_timer[0] = None
+        _do_auto_exit("浏览器已关闭")
+
+    timer = threading.Timer(BYE_DELAY_SEC, fire)
+    timer.daemon = True
+    _bye_timer[0] = timer
+    timer.start()
+
+
+def auto_exit_watch():
+    """兜底守护线程：PC 模式长时间无心跳则退出。"""
+    while True:
+        time.sleep(20)
+        if LIGHT:
+            continue
+        if _bye_timer[0] is not None:
+            continue                      # 已有待退出计划，交给它
+        if time.time() - _last_beat[0] > AUTO_EXIT_SEC:
+            _do_auto_exit("长时间无心跳")
+            return
+
+
 def open_browser(url):
     try:
         ok = webbrowser.open(url)
@@ -7644,11 +7797,15 @@ def main():
     port = pick_port()
     url = f"http://{HOST}:{port}/"
     srv = ThreadingHTTPServer((HOST, port), Handler)
+    _srv_ref[0] = srv                      # v1.7.3：供关页自动退出使用
     print("=" * 58)
     print(f"  {APP_TITLE}  v{VERSION}")
     print(f"  服务地址: {url}")
-    print("  关闭此窗口即停止服务")
+    print("  关闭浏览器标签页后服务将自动退出")
     print("=" * 58)
+    if not LIGHT:                          # PC 才启用关页退出 / 心跳兜底；iOS 原生壳不管
+        _last_beat[0] = time.time()
+        threading.Thread(target=auto_exit_watch, daemon=True, name="auto-exit").start()
     if not os.environ.get("NO_BROWSER"):
         threading.Timer(0.8, lambda: open_browser(url)).start()
     try:
