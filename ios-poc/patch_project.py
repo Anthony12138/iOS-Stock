@@ -7,6 +7,9 @@
   4) 改 App 显示名为「股票筛选系统」（CFBundleDisplayName / CFBundleName）
   5) 安装 App 图标：assets/AppIcon-1024.png → AppIcon.appiconset + 登记 Contents.json
   6) v1.7.2：注入沉浸式状态栏开关（白色文字 / 不隐藏），配合边缘到边缘 WebView
+  7) v1.7.4：从 app.py 的 VERSION 读取版本号写入 plist（CFBundleShortVersionString /
+     CFBundleVersion），并设包名 CFBundleIdentifier=org.python.stockscreener，
+     让 LiveContainer / 设置页显示真实版本与包名，而不再是 testbed 默认的 1.0 / iOSTestbed
 
 用法：python3 patch_project.py <解压出的 testbed 目录> <overrides 目录>
   - app.py 与 web/ 的来源固定取「本脚本所在目录/app_source」，
@@ -27,6 +30,23 @@ APP_DIR = os.path.join(TESTBED, "iOSTestbed")
 BUNDLE_APP = os.path.join(APP_DIR, "app")          # bundle 里的只读 app 目录
 plist_path = os.path.join(APP_DIR, "iOSTestbed-Info.plist")
 APP_NAME = "股票筛选系统"
+APP_BUNDLE_ID = "org.python.stockscreener"   # LiveContainer / 设置页显示的包名
+
+# v1.7.4：版本号直接从业务本体 app.py 的 VERSION 读取，避免手工改漏、
+# 让 ipa 版本号始终与 PC 端 / 启动页一致（不再固定显示 testbed 默认的 1.0）。
+def _read_version():
+    src = os.path.join(APP_SOURCE, "app.py")
+    try:
+        import re
+        with open(src, "r", encoding="utf-8") as f:
+            m = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', f.read(), re.M)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "1.0"
+
+APP_VERSION = _read_version()
 
 # 1) 覆盖 SceneDelegate.m（ObjC 启动壳）
 shutil.copyfile(os.path.join(OVERRIDES, "SceneDelegate.m"),
@@ -55,6 +75,10 @@ with open(plist_path, "rb") as f:
     plist = plistlib.load(f)
 plist["CFBundleDisplayName"] = APP_NAME   # 桌面图标下方显示的名字
 plist["CFBundleName"] = APP_NAME           # 系统设置/任务切换里显示的名字
+# v1.7.4：版本号 + 包名。LiveContainer 列表显示的「x.y.z - 包名」就取自下面两处。
+plist["CFBundleShortVersionString"] = APP_VERSION   # 用户可见版本号（1.7.3）
+plist["CFBundleVersion"] = APP_VERSION              # build 号，保持一致
+plist["CFBundleIdentifier"] = APP_BUNDLE_ID         # org.python.stockscreener
 plist["NSAppTransportSecurity"] = {
     "NSAllowsArbitraryLoads": True,
     "NSAllowsLocalNetworking": True,
@@ -67,7 +91,8 @@ plist["UIStatusBarStyle"] = "UIStatusBarStyleLightContent"
 plist["UIStatusBarHidden"] = False
 with open(plist_path, "wb") as f:
     plistlib.dump(plist, f)
-print("patched plist: name =", APP_NAME, "| ATS:", plist_path)
+print("patched plist: name =", APP_NAME, "| version =", APP_VERSION,
+      "| bundle id =", APP_BUNDLE_ID, "|", plist_path)
 
 # 4) 安装 App 图标：testbed 图标槽位原本无 filename（故显示空白）
 icon_set = os.path.join(APP_DIR, "Assets.xcassets", "AppIcon.appiconset")

@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.2"
+VERSION = "1.7.3"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -6800,13 +6800,27 @@ def _ld_pctile(v, arr):
 
 LD_PUSH_HOSTS = ("push2.eastmoney.com", "82.push2.eastmoney.com", "push2delay.eastmoney.com")
 
+# v1.7.3：龙头分析多数据源。2026-11 实测 push2 全域名被限流（RemoteDisconnected），
+# 但东财 datacenter 板块资金榜、同花顺板块详情仍可用。改为三源轮询 + 缓存兜底，
+# 任一源成功即返回，全失败时退回上一次成功的快照，不再直接报「接口暂时无响应」。
+_LD_SRC = {"board": "", "members": ""}      # 最近一次成功的来源名（写进响应便于前端标注）
+_LD_CACHE = {}                              # key -> (timestamp, value)，接口失败时兜底
+_LD_THS_MAP = {"ts": 0, "data": None}       # 同花顺「板块名→代码」映射，缓存 10 分钟
+
+
+def _ld_cache_get(key, ttl):
+    hit = _LD_CACHE.get(key)
+    if hit and time.time() - hit[0] <= ttl:
+        return hit[1]
+    return None
+
+
+def _ld_cache_put(key, val):
+    _LD_CACHE[key] = (time.time(), val)
+
 
 def _ld_push_get(q, timeout=6):
-    """东财 push2 系列接口的多域名兜底。
-
-    2026-11 实测：连续请求后单个域名会直接返回 RemoteDisconnected（不发响应），
-    换一个镜像域名往往立刻可用；全部失败才把最后一个异常抛给上层。
-    """
+    """东财 push2 系列接口的多域名兜底（备用源）。"""
     last = None
     for h in LD_PUSH_HOSTS:
         try:
@@ -6816,18 +6830,193 @@ def _ld_push_get(q, timeout=6):
     raise last if last is not None else RuntimeError("push2 unavailable")
 
 
+def _dc_board_page(t, pz=100):
+    """东财 datacenter 板块资金流榜（主源）。t=2 行业 / t=3 概念。
+       返回结构对齐 push2 的 page：total + diff[{f12,f14,f3,f62,f6,f21,f104,f105,f8,f10,f128,f136}]。
+       datacenter 没有成交额 / 涨跌家数 / 换手 / 量比，用比值列与估算值填充，
+       板块筛选主要看 f62 主力净额、f3 涨幅、f14 名称，这些都有真实值。"""
+    rn = "RPT_INDUSTRY_FUNDFLOW" if t == 2 else "RPT_CONCEPT_FUNDFLOW"
+    # 按最近交易日过滤，避免历史数据按净流入排序把旧日期的高值顶到前面
+    td = last_trade_date()
+    flt = urllib.parse.quote("(TRADE_DATE='%s')" % td) if td else ""
+    u = ("https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=%s"
+         "&columns=ALL&pageNumber=1&pageSize=%d&sortColumns=NET_INFLOW&sortTypes=-1"
+         "&source=WEB&client=WEB" % (rn, pz))
+    if flt:
+        u += "&filter=" + flt
+    j = http_json(u, timeout=10, retries=1) or {}
+    if not j.get("success"):
+        raise RuntimeError("datacenter board: %s" % j.get("message"))
+    result = j.get("result") or {}
+    rows = result.get("data") or []
+    # 双保险：即便 filter 未生效，也只保留最近交易日那批
+    dates = sorted([str(r.get("TRADE_DATE") or "")[:10] for r in rows if r.get("TRADE_DATE")], reverse=True)
+    latest = dates[0] if dates else td
+    diff = []
+    for r in rows:
+        if latest and str(r.get("TRADE_DATE") or "")[:10] != latest:
+            continue
+        net = _ld_f(r.get("NET_INFLOW"))          # 主力净额（元）
+        ratio = _ld_f(r.get("NET_INFLOW_RATIO"))  # 净额占成交额百分比
+        amt = (net / (ratio / 100.0)) if ratio > 0.01 else 0.0   # 反推成交额
+        diff.append({
+            "f12": str(r.get("BOARD_CODE") or ""), "f14": str(r.get("BOARD_NAME") or ""),
+            "f3": _ld_f(r.get("CHANGE_RATE")), "f62": net, "f6": amt, "f21": 0.0,
+            "f104": 0, "f105": 0, "f8": 0.0, "f10": 0.0,
+            "f128": str(r.get("MAX_NETINFLOW_SEC") or ""), "f136": 0.0
+        })
+    if not diff:
+        raise RuntimeError("datacenter board empty")
+    return {"total": int(result.get("count") or len(diff)), "diff": diff, "date": latest}
+
+
 def _ld_board_page(t, pz=100):
-    """行业(t=2) / 概念(t=3) 板块榜，按主力净额降序。"""
-    q = ("/api/qt/clist/get?pn=1&pz=%d&po=1&np=1&fltt=2"
-         "&invt=2&fid=f62&fs=m:90+t:%d&fields=%s" % (pz, t, LD_BF))
-    return (_ld_push_get(q) or {}).get("data") or {}
+    """行业(t=2) / 概念(t=3) 板块资金榜。datacenter 主源 → push2 备源 → 缓存兜底。"""
+    key = "board:%d" % t
+    errs = []
+    try:
+        page = _dc_board_page(t, pz)
+        if page.get("diff"):
+            _LD_SRC["board"] = "东财资金流"
+            _ld_cache_put(key, page)
+            return page
+    except Exception as e:
+        errs.append("datacenter:%s" % type(e).__name__)
+    try:
+        q = ("/api/qt/clist/get?pn=1&pz=%d&po=1&np=1&fltt=2"
+             "&invt=2&fid=f62&fs=m:90+t:%d&fields=%s" % (pz, t, LD_BF))
+        page = (_ld_push_get(q) or {}).get("data") or {}
+        if page.get("diff"):
+            _LD_SRC["board"] = "东财push2"
+            _ld_cache_put(key, page)
+            return page
+    except Exception as e:
+        errs.append("push2:%s" % type(e).__name__)
+    cached = _ld_cache_get(key, 1800)
+    if cached:
+        _LD_SRC["board"] = "缓存快照"
+        return cached
+    raise RuntimeError("board sources failed: " + ",".join(errs))
 
 
-def _ld_members(bk):
-    q = ("/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2"
-         "&invt=2&fid=f62&fs=b:%s&fields=f2,f3,f6,f8,f10,f12,f13,f14,f21,f62"
-         % urllib.parse.quote(str(bk)))
-    return ((_ld_push_get(q) or {}).get("data") or {}).get("diff") or []
+def _ths_board_map():
+    """同花顺「板块名→代码」映射（概念 + 行业），缓存 10 分钟。"""
+    if _LD_THS_MAP["data"] is not None and time.time() - _LD_THS_MAP["ts"] < 600:
+        return _LD_THS_MAP["data"]
+    m = {}   # name -> (code, kind)，kind 决定详情 URL 用 gn 还是 thshy
+    for kind in ("gn", "thshy"):
+        try:
+            txt = http_text("https://q.10jqka.com.cn/%s/" % kind, encoding="gbk",
+                            retries=1, timeout=10,
+                            headers={**HEADERS, "Referer": "https://q.10jqka.com.cn/"})
+            for code, name in re.findall(r"/%s/detail/code/(\d+)/[^>]*>([^<]+)<" % kind, txt):
+                nm = re.sub(r"\s+", "", name)
+                if nm and nm not in m:
+                    m[nm] = (code, kind)
+        except Exception:
+            continue
+    if m:
+        _LD_THS_MAP.update(ts=time.time(), data=m)
+    return m
+
+
+def _num_cn(s):
+    """同花顺成交额/市值形如 1.63亿 / 8300万 → 返回元。"""
+    s = str(s or "").strip()
+    if not s or s in ("--", "-"):
+        return 0.0
+    m = re.match(r"([-\d.]+)\s*([亿万]?)", s)
+    if not m:
+        return 0.0
+    v = _ld_f(m.group(1))
+    unit = m.group(2)
+    return v * (1e8 if unit == "亿" else 1e4 if unit == "万" else 1.0)
+
+
+def _ths_norm_name(s):
+    """板块名归一化：去空格、罗马数字分级后缀（白酒Ⅱ→白酒）、首尾空白，便于两站匹配。"""
+    s = re.sub(r"\s+", "", str(s or ""))
+    s = re.sub(r"[ⅠⅡⅢⅣⅤ]+$", "", s)
+    return s
+
+
+def _ths_match(name):
+    """名称精确匹配优先，其次归一化后互相包含（东财「白酒Ⅱ」↔同花顺「白酒」）。"""
+    m = _ths_board_map()
+    key = re.sub(r"\s+", "", str(name or ""))
+    if key in m:
+        return m[key]
+    nk = _ths_norm_name(key)
+    for k, v in m.items():
+        if _ths_norm_name(k) == nk:
+            return v
+    for k, v in m.items():
+        nk2 = _ths_norm_name(k)
+        if len(nk) >= 3 and len(nk2) >= 3 and (nk in nk2 or nk2 in nk):
+            return v
+    return None
+
+
+def _ths_members(name, board_net=0.0, board_amt=0.0):
+    """同花顺板块详情页成分股（主源）。返回对齐 push2 的 members 结构。
+       同花顺无个股主力净额，用「板块主力净额 × 个股成交额占比」近似，保证资金维度仍有效。"""
+    hit = _ths_match(name)
+    if not hit:
+        raise RuntimeError("ths board code not found: %s" % name)
+    code, kind = hit
+    txt = http_text("https://q.10jqka.com.cn/%s/detail/code/%s/" % (kind, code), encoding="gbk",
+                    retries=1, timeout=10,
+                    headers={**HEADERS, "Referer": "https://q.10jqka.com.cn/"})
+    body = re.search(r"<tbody>(.*?)</tbody>", txt, re.S)
+    if not body:
+        raise RuntimeError("ths members empty")
+    out = []
+    for tr in re.findall(r"<tr>(.*?)</tr>", body.group(1), re.S):
+        cells = [re.sub(r"<[^>]+>", "", c).strip() for c in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
+        if len(cells) < 10 or not re.match(r"^\d{6}$", cells[1] if len(cells) > 1 else ""):
+            continue
+        ccode = cells[1]
+        amt = _num_cn(cells[10]) if len(cells) > 10 else 0.0
+        net = (board_net * (amt / board_amt)) if board_amt > 0 else 0.0
+        out.append({
+            "f12": ccode, "f14": cells[2], "f2": _ld_f(cells[3]), "f3": _ld_f(cells[4]),
+            "f8": _ld_f(cells[7]), "f10": _ld_f(cells[8]),
+            "f6": amt, "f21": _num_cn(cells[11]) if len(cells) > 11 else 0.0,
+            "f62": net, "f13": 1 if ccode[0] == "6" else 0
+        })
+    if not out:
+        raise RuntimeError("ths members parse empty")
+    return out
+
+
+def _ld_members(name, board_net=0.0, board_amt=0.0):
+    """板块成分股。同花顺主源 → push2 备源（入参是 BK 代码时）→ 缓存兜底。"""
+    key = "members:%s" % name
+    errs = []
+    try:
+        rows = _ths_members(name, board_net, board_amt)
+        _LD_SRC["members"] = "同花顺"
+        _ld_cache_put(key, rows)
+        return rows
+    except Exception as e:
+        errs.append("ths:%s" % type(e).__name__)
+    if re.match(r"^BK\d+", str(name)):
+        try:
+            q = ("/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2"
+                 "&invt=2&fid=f62&fs=b:%s&fields=f2,f3,f6,f8,f10,f12,f13,f14,f21,f62"
+                 % urllib.parse.quote(str(name)))
+            rows = ((_ld_push_get(q) or {}).get("data") or {}).get("diff") or []
+            if rows:
+                _LD_SRC["members"] = "东财push2"
+                _ld_cache_put(key, rows)
+                return rows
+        except Exception as e:
+            errs.append("push2:%s" % type(e).__name__)
+    cached = _ld_cache_get(key, 1800)
+    if cached:
+        _LD_SRC["members"] = "缓存快照"
+        return cached
+    return []   # 成分股取不到时该板块跳过，不影响其他板块
 
 
 def _ld_hot(c, b):
@@ -6843,7 +7032,8 @@ def _ld_build_board(c, zmap):
        换手 15 / 量比 10，涨停再直接加分。龙头判定先看涨停、再看连板数、
        最后才比分数——盘面上的「龙头」就是最高板那只，不会出现龙头首板而板块
        另有二板的矛盾。"""
-    ms = _ld_members(c["code"])
+    # v1.7.3：同花顺成分股无个股主力净额，用板块净额×成交额占比近似传入
+    ms = _ld_members(c.get("name") or c["code"], c.get("net", 0) * 1e8, c.get("amount", 0) * 1e8)
     main = []
     for m in ms:
         code = str(m.get("f12") or "")
@@ -7006,16 +7196,24 @@ def leader_analysis(params):
             if len(picks) >= p["boards"]:
                 break
 
+        board_src = _LD_SRC.get("board") or "东财资金流"
+        mem_src = _LD_SRC.get("members") or "同花顺"
+        src_txt = "%s板块 + %s成分股" % (board_src, mem_src)
+        if zsrc:
+            src_txt += " + 同花顺涨停池"
+        cache_used = ("缓存快照" in board_src) or ("缓存快照" in mem_src)
         return {"ok": True, "mode": "leader",
                 "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
                 "date": zdate or last_trade_date(),
-                "source": "东财板块 + 同花顺涨停池" if zsrc else "东财板块",
+                "source": src_txt, "cache_used": cache_used,
                 "market": market_status(), "scanned": scanned, "inflow": inflow,
                 "covered": covered, "elapsed": round(time.time() - t0, 1),
                 "list": picks, "params": p,
                 "empty": "" if picks else (
-                    "板块资金榜接口（东财）暂时无响应，稍后会自动重试"
-                    if board_err >= 2 else "当前没有资金净流入且成交额达标的板块，等放量后再试")}
+                    "板块数据源暂时都不可用，已沿用最近一次缓存；稍后会自动重试"
+                    if cache_used else (
+                        "板块资金榜接口暂时无响应，稍后会自动重试"
+                        if board_err >= 2 else "当前没有资金净流入且成交额达标的板块，等放量后再试"))}
 
     key = "leader:%d:%d" % (p["boards"], p["follow"])
     try:

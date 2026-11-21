@@ -1095,7 +1095,7 @@
     </svg>
     <span class="lbl">选项</span><span class="auto-badge" id="autoBadge" hidden>0</span>
   </button>
-  <button class="btn primary" id="btnScan">开始扫描</button>
+  <button class="btn primary" id="btnScan">开始扫描全部板块</button>
 </header>
 
 <div class="wrap">
@@ -1114,15 +1114,6 @@
 
   <!-- ============ 选股视图 ============ -->
   <section id="view-scan">
-    <div class="funnel" id="funnel">
-      <div class="fstep"><div class="lbl">全市场主板</div><div class="val num" id="f0">—</div><div class="bar"><i style="width:100%"></i></div></div>
-      <div class="fstep"><div class="lbl">① 涨幅 3~5%</div><div class="val num" id="f1">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep"><div class="lbl">② 量比 ≥ 1</div><div class="val num" id="f2">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep"><div class="lbl">③ 换手 5~10%</div><div class="val num" id="f3">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep"><div class="lbl">④ 流通市值 50~200亿</div><div class="val num" id="f4">—</div><div class="bar"><i></i></div></div>
-      <div class="fstep last"><div class="lbl">⑤~⑧ 深度入选</div><div class="val num" id="f5">—</div><div class="bar"><i></i></div></div>
-    </div>
-
     <div class="main">
       <!-- 左：条件 -->
       <aside class="card" style="position:sticky;top:78px">
@@ -1185,23 +1176,16 @@
             </div>
           </div>
         </div>
-        <div class="dim-grp"><b>评分维度（仅本板块）</b>
-          <small>只影响「一夜持股」，其余板块在「选项 → 筛选」里设置</small></div>
-        <div class="auto-item" style="padding:11px 14px;border-bottom:none">
-          <div class="nm"><b>消息面 + 情绪面评分</b><small>开启后按公告与炒作热度加分：消息面 6 分、情绪面 10 分；关闭则回到原 8 条硬条件</small></div>
+        <div class="auto-item" style="padding:11px 14px;border-top:1px solid var(--line)">
+          <div class="nm"><b>消息面 + 情绪面评分（仅本板块）</b><small>开启后按公告与炒作热度加分：消息面 6 分、情绪面 10 分；关闭则回到原 8 条硬条件</small></div>
           <div class="ctl"><label class="sw"><input type="checkbox" id="dimNight" aria-label="一夜持股消息面与情绪面评分" /><i></i></label></div>
         </div>
         <div class="dim-state" id="dimNightState" style="margin:0 14px 10px"></div>
-        <div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px">
-          <div style="display:flex;gap:6px;margin-bottom:2px">
-            <button class="btn sm" id="presetStd" style="flex:1;justify-content:center;border-color:rgba(233,185,73,.4);color:#E9B949">标准模式</button>
-            <button class="btn sm" id="presetLoose" style="flex:1;justify-content:center">宽松模式</button>
-          </div>
-          <button class="btn primary" id="btnScan2" style="width:100%;justify-content:center;height:38px">开始扫描全市场</button>
-          <div style="display:flex;gap:8px">
-            <button class="btn sm" id="btnReset" style="flex:1;justify-content:center">恢复默认</button>
-            <button class="btn sm" id="btnExport" style="flex:1.6;justify-content:center;padding:0 6px;font-size:11px" title="导出当前筛选结果（按当前股价筛选与评分门槛过滤后的列表）">导出当前筛选结果</button>
-          </div>
+        <div class="auto-item" style="padding:11px 14px;border-top:1px solid var(--line);border-bottom:none">
+          <div class="nm"><b>宽松模式</b><small>关闭＝标准模式（视频原参数）；打开＝宽松模式，候选会明显变多</small></div>
+          <div class="ctl"><label class="sw"><input type="checkbox" id="presetLooseSw" aria-label="宽松模式" /><i></i></label></div>
+        </div>
+        <div style="padding:10px 14px 12px">
           <div class="saved-hint" id="saveHint"><i></i>参数已自动保存，刷新或重开都不会丢</div>
         </div>
       </aside>
@@ -1213,7 +1197,6 @@
           <span class="pill" id="countPill" style="height:22px">0 只</span>
           <span class="upd" id="lastUpd"></span>
           <div class="spacer"></div>
-          <input class="search" id="search" placeholder="代码 / 名称 / 行业" />
           <div class="seg" id="gradeSeg">
             <button class="on" data-g="all">全部</button>
             <button data-g="S">S</button>
@@ -1246,7 +1229,7 @@
           <div class="empty" id="empty">
             <div class="big">尚未扫描</div>
             <div class="sub">
-              点击左侧「开始扫描全市场」，系统会拉取约 3500 只主板个股实时行情，<br />
+              点击顶部「开始扫描」，系统会拉取约 3500 只主板个股实时行情，<br />
               按视频里的 8 条规则逐层过滤，再对候选股做 K 线与分时深度打分。
             </div>
           </div>
@@ -1254,6 +1237,15 @@
         <!-- 手机端：与其余板块同款卡片；PC 端仍是上面的表格 -->
         <div class="ai-grid" id="scanGrid"></div>
       </section>
+    </div>
+    <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-scan"><input class="search" id="search" placeholder="代码 / 名称 / 行业" /></div></div>
+    <div class="funnel" id="funnel">
+      <div class="fstep"><div class="lbl">全市场主板</div><div class="val num" id="f0">—</div><div class="bar"><i style="width:100%"></i></div></div>
+      <div class="fstep"><div class="lbl">① 涨幅 3~5%</div><div class="val num" id="f1">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep"><div class="lbl">② 量比 ≥ 1</div><div class="val num" id="f2">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep"><div class="lbl">③ 换手 5~10%</div><div class="val num" id="f3">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep"><div class="lbl">④ 流通市值 50~200亿</div><div class="val num" id="f4">—</div><div class="bar"><i></i></div></div>
+      <div class="fstep last"><div class="lbl">⑤~⑧ 深度入选</div><div class="val num" id="f5">—</div><div class="bar"><i></i></div></div>
     </div>
   </section>
 
@@ -1295,18 +1287,17 @@
           <option value="60">60 只</option>
         </select></span>
         </div>
-        <div class="ai-swing-toggle" id="aiSwingToggleRow" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;box-sizing:border-box;background:var(--bg2,#182231);border-radius:8px;padding:9px 11px;margin-bottom:0;cursor:pointer">
-          <div>
-            <div style="font-size:12px;color:var(--text,#E9EFF8)" id="aiSwingLabel">多日持股算法</div>
-            <div style="font-size:11px;color:var(--muted,#7C8798);margin-top:2px" id="aiSwingDesc">开启后按趋势波段口径筛选（仅影响 AI 荐股）</div>
-          </div>
-          <label class="sw" style="flex:none"><input type="checkbox" id="aiSwingChk" aria-label="AI荐股使用多日持股算法" /><i></i></label>
-        </div>
-        <button class="btn primary" id="btnAI">开始 AI 选股</button>
       </div>
     </div>
 
     <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-ai"></div></div>
+    <div class="ai-swing-toggle" id="aiSwingToggleRow" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;box-sizing:border-box;background:var(--bg2,#182231);border-radius:8px;padding:9px 11px;margin:0 0 10px;cursor:pointer">
+      <div>
+        <div style="font-size:12px;color:var(--text,#E9EFF8)" id="aiSwingLabel">多日持股算法</div>
+        <div style="font-size:11px;color:var(--muted,#7C8798);margin-top:2px" id="aiSwingDesc">开启后按趋势波段口径筛选（仅影响 AI 荐股）</div>
+      </div>
+      <label class="sw" style="flex:none"><input type="checkbox" id="aiSwingChk" aria-label="AI荐股使用多日持股算法" /><i></i></label>
+    </div>
 
     <div class="ai-stats">
       <div class="ai-stat"><div class="k">主板样本</div><div class="v num" id="aiTotal">—</div></div>
@@ -1321,7 +1312,7 @@
 
     <div class="ai-grid" id="aiGrid"></div>
     <div class="ai-empty" id="aiEmpty">
-      点击右上角「开始 AI 选股」。<br />
+      点击顶部「开始扫描全部板块」。<br />
       系统先从 3000+ 只主板股里按资金 + 量比 + 涨幅 + 换手做初筛，再对候选池逐只算指标和形态，大约需要 10–40 秒。
     </div>
 
@@ -1360,7 +1351,6 @@
           <button data-f="overnight">隔夜单</button>
         </div></span>
         </div>
-        <button class="btn primary" id="btnZT">刷新涨停池</button>
       </div>
     </div>
 
@@ -1378,7 +1368,7 @@
     <div class="note" id="ztEmotion" style="margin-top:8px;display:none"></div>
     <div class="ai-grid" id="ztGrid"></div>
     <div class="ai-empty" id="ztEmpty">
-      点击右上角「刷新涨停池」。系统会拉取当日涨停名单、封板数据与涨停原因，<br />
+      点击顶部「开始扫描全部板块」。系统会拉取当日涨停名单、封板数据与涨停原因，<br />
       再逐只算日K位置与形态，约需 5–15 秒。
     </div>
 
@@ -1419,7 +1409,6 @@
           <button data-f="close">尾盘次日</button>
         </div></span>
         </div>
-        <button class="btn primary" id="btnDT">刷新跌停池</button>
       </div>
     </div>
 
@@ -1437,7 +1426,7 @@
 
     <div class="ai-grid" id="dtGrid"></div>
     <div class="ai-empty" id="dtEmpty">
-      点击右上角「刷新跌停池」。系统会拉取当日跌停名单、封单与开板数据，<br />
+      点击顶部「开始扫描全部板块」。系统会拉取当日跌停名单、封单与开板数据，<br />
       再逐只算日K位置与量能，约需 5–15 秒。
     </div>
 
@@ -1483,7 +1472,6 @@
               <option value="8">8 只</option>
             </select></span>
         </div>
-        <button class="btn primary" id="btnLD">刷新龙头榜</button>
       </div>
     </div>
 
@@ -1500,7 +1488,7 @@
 
     <div class="lt-grid" id="ldGrid"></div>
     <div class="ai-empty" id="ldEmpty">
-      点击「刷新龙头榜」。系统先扫全部行业与概念板块的资金流，<br />
+      点击顶部「开始扫描全部板块」。系统先扫全部行业与概念板块的资金流，<br />
       再拉取入选板块的主板成分股排序，大约 1–3 秒。
     </div>
 
@@ -1963,9 +1951,8 @@ function setLoading(on, title, sub, pct) {
 
 /* 顶栏两个扫描按钮统一锁：一个板块在跑的时候别让人再点一次 */
 function lockScanBtns(on) {
-  const b = $('#btnScan'), b2 = $('#btnScan2');
-  if (b) { b.disabled = on; b.textContent = on ? '扫描中…' : '开始扫描'; }
-  if (b2) b2.disabled = on;
+  const b = $('#btnScan');
+  if (b) { b.disabled = on; b.textContent = on ? '扫描中…' : '开始扫描全部板块'; }
 }
 
 /* 五个板块共用同一条扫描进度浮层（就是 App 刚打开时那个）：
@@ -2325,11 +2312,8 @@ function syncSwitchDisabled() {
 
 function markPreset(kind) {
   state.preset = kind || '';
-  const on = 'rgba(233,185,73,.4)', off = 'var(--line2)';
-  $('#presetStd').style.borderColor = kind === 'std' ? on : off;
-  $('#presetStd').style.color = kind === 'std' ? '#E9B949' : 'var(--muted)';
-  $('#presetLoose').style.borderColor = kind === 'loose' ? on : off;
-  $('#presetLoose').style.color = kind === 'loose' ? '#E9B949' : 'var(--muted)';
+  const sw = $('#presetLooseSw');   // v1.7.3：标准/宽松两按钮合并为「宽松模式」开关，开=loose、关=std
+  if (sw) sw.checked = (kind === 'loose');
 }
 
 function applySettings(s) {
@@ -2570,7 +2554,7 @@ function renderTable() {
       sub = '数据获取失败：' + esc(state.scanError) + '。<br />请检查网络后点「开始扫描」重试。';
     } else if (!state.data) {
       big = '尚未扫描';
-      sub = '点击左侧「开始扫描全市场」，系统会拉取约 3500 只主板个股实时行情，<br />按视频里的 8 条规则逐层过滤，再对候选股做 K 线与分时深度打分。';
+      sub = '点击顶部「开始扫描」，系统会拉取约 3500 只主板个股实时行情，<br />按视频里的 8 条规则逐层过滤，再对候选股做 K 线与分时深度打分。';
     } else {
       big = '当前条件下没有入选标的';
       sub = '可以适当放宽条件：涨幅上限调到 6%、换手放宽到 4~12%、或降低评分门槛到 55 分再试。' + pfEmptyNote();
@@ -4226,17 +4210,6 @@ $$('.switch').forEach(sw => {
     saveSettings();
   };
 });
-$('#btnReset').onclick = () => {
-  const d = { gain_min: 3, gain_max: 5, vr_min: 1.0, turn_min: 5, turn_max: 10, fcap_min: 50, fcap_max: 200, vol_cv_max: 0.65, min_amount: 0.8, score_min: 60 };
-  Object.entries(d).forEach(([k, v]) => { const el = $('#' + k); if (el) el.value = v; });
-  $('#entry_time').value = '14:30';
-  $('#exclude_st').checked = true; $('#min_amount_on').checked = true;
-  $$('.switch').forEach(s => s.classList.add('on'));
-  ['gain_min', 'gain_max', 'vr_min', 'turn_min', 'turn_max', 'fcap_min', 'fcap_max'].forEach(id => $('#' + id).disabled = false);
-  markPreset(''); saveSettings(true);       // 默认值也写盘，避免刷新后回到上次的旧参数
-  toast('已恢复默认参数');
-};
-
 function applyPreset(kind) {
   const P = kind === 'std'
     ? { gain_min: 3, gain_max: 5, vr_min: 1.0, turn_min: 5, turn_max: 10, fcap_min: 50, fcap_max: 200, vol_cv_max: 0.65, min_amount: 0.8, score_min: 60 }
@@ -4248,30 +4221,11 @@ function applyPreset(kind) {
   saveSettings(true);
   toast(kind === 'std' ? '已切换到标准模式（视频原参数）' : '已切换到宽松模式，候选会明显变多');
 }
-$('#presetStd').onclick = () => applyPreset('std');
-$('#presetLoose').onclick = () => applyPreset('loose');
+/* v1.7.3：标准/宽松合并为「宽松模式」开关——关＝std，开＝loose，默认关 */
+const presetLooseSw = $('#presetLooseSw');
+if (presetLooseSw) presetLooseSw.addEventListener('change', () => applyPreset(presetLooseSw.checked ? 'loose' : 'std'));
 
-/* ------------------ 导出 / 保存 ------------------ */
-/* 导出改 POST + Blob 下载，避免 GET 查询串过长；只导出当前筛选后的列表 */
-$('#btnExport').onclick = async () => {
-  if (!state.data) return toast('先扫描一次再导出');
-  try {
-    const res = await apiFetch('/api/export', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ list: filtered() })
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = '选股结果.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast('已导出当前筛选结果');
-  } catch (e) {
-    toast('导出失败：' + (e.message || '接口异常') + '，请重试', 3200);
-  }
-};
+/* ------------------ 保存 ------------------ */
 $('#btnSave').onclick = async () => {
   if (!state.data) return toast('先扫描一次再保存');
   try {
@@ -4367,7 +4321,7 @@ function syncPfUi() {
   }
 }
 /* 搜索框只有一个 DOM 节点，切板块时搬到当前板块的宿主里，五板块共用同一份 state.search */
-const VSEARCH_HOST = { ai: '#vsh-ai', swing: '#vsh-swing', zt: '#vsh-zt', dt: '#vsh-dt', ld: '#vsh-ld' };
+const VSEARCH_HOST = { scan: '#vsh-scan', ai: '#vsh-ai', swing: '#vsh-swing', zt: '#vsh-zt', dt: '#vsh-dt', ld: '#vsh-ld' };
 function placeSearch(view) {
   const el = $('#search');
   if (!el) return;
@@ -4866,8 +4820,10 @@ function setMeta(k, left, right) {
   paintTwo(el);
 }
 const normMetaParts = (k, d) => {
-  const left = (k === 'zt' || k === 'dt' || k === 'ld')
+  let left = (k === 'zt' || k === 'dt' || k === 'ld')
     ? (d.date || d.source || '—') : (d.source || '—');
+  // v1.7.3：龙头分析走到缓存兜底时，在日期后标注「缓存」，如实告知数据非最新
+  if (k === 'ld' && d.cache_used) left += ' ·缓存';
   return [left, d.elapsed != null ? d.elapsed + 's' : '—'];
 };
 function restoreMeta(k) {
@@ -5664,7 +5620,7 @@ async function runAI(silent) {
     [68, '对候选股拉日K与分时，做深度分析'],
     [88, '深度分析中，即将生成九宫格卡片']
   ]);
-  if (!quiet) { btn.disabled = true; btn.textContent = '分析中…'; lockScanBtns(true); }
+  if (!quiet) { if (btn) { btn.disabled = true; btn.textContent = '分析中…'; } lockScanBtns(true); }
   $('#aiEmpty').style.display = 'none';
   const before = state.ai ? (state.ai.list || []).filter(inPF).length : undefined;
   const started = Date.now();
@@ -5728,11 +5684,10 @@ async function runAI(silent) {
     restoreMeta('ai');                    // 恢复「扫描中 Ns」为正常文案
     state.aiLoading = false;
     if (prog) prog.stop();
-    if (!quiet) { setLoading(false); lockScanBtns(false); btn.disabled = false; btn.textContent = '开始 AI 选股'; }
+    if (!quiet) { setLoading(false); lockScanBtns(false); if (btn) { btn.disabled = false; btn.textContent = '开始 AI 选股'; } }
   }
 }
 
-$('#btnAI').onclick = () => { if (autoBusy('ai')) return toast('正在刷新中，稍等几秒', 1800); runAI(); };
 ['aiUniverse', 'aiMinScore', 'aiTop'].forEach(id => {
   $('#' + id).onchange = () => { if (state.ai) runAI(); };
 });
@@ -5803,7 +5758,7 @@ function renderZT() {
   empty.style.display = list.length ? 'none' : '';
   if (!list.length) {
     empty.innerHTML = state.ztFilter === 'all'
-      ? `当日没有取到主板涨停股。可能是非交易日、接口临时限流，或今天涨停的都是创业板 / 科创板。<br />点右上角「刷新涨停池」再试一次。` + pfEmptyNote()
+      ? `当日没有取到主板涨停股。可能是非交易日、接口临时限流，或今天涨停的都是创业板 / 科创板。<br />点顶部「开始扫描全部板块」再试一次。` + pfEmptyNote()
       : `当前筛选下没有标的。切到「全部」看看，或换一天再看。` + pfEmptyNote();
     return;
   }
@@ -5881,7 +5836,7 @@ async function runZT(silent) {
     [74, '题材联动与封板质量打分'],
     [90, '整理盘中观察 / 隔夜单分栏…']
   ]);
-  if (!quiet) { btn.disabled = true; btn.textContent = '拉取中…'; lockScanBtns(true); }
+  if (!quiet) { if (btn) { btn.disabled = true; btn.textContent = '拉取中…'; } lockScanBtns(true); }
   $('#ztEmpty').style.display = 'none';
   const before = state.ztd ? (state.ztd.list || []).filter(inPF).length : undefined;
   const started = Date.now();
@@ -5936,11 +5891,10 @@ async function runZT(silent) {
     restoreMeta('zt');
     state.ztdLoading = false;
     if (prog) prog.stop();
-    if (!quiet) { setLoading(false); lockScanBtns(false); btn.disabled = false; btn.textContent = '刷新涨停池'; }
+    if (!quiet) { setLoading(false); lockScanBtns(false); if (btn) { btn.disabled = false; btn.textContent = '刷新涨停池'; } }
   }
 }
 
-$('#btnZT').onclick = () => { if (autoBusy('zt')) return toast('正在刷新中，稍等几秒', 1800); runZT(); };
 $$('#ztSeg button').forEach(b => {
   b.onclick = () => {
     $$('#ztSeg button').forEach(x => x.classList.remove('on'));
@@ -5970,7 +5924,7 @@ function renderDT() {
   empty.style.display = list.length ? 'none' : '';
   if (!list.length) {
     empty.innerHTML = state.dtFilter === 'all'
-      ? `当日没有取到主板跌停股。可能是非交易日、接口临时限流，或今天跌停的都是创业板 / 科创板。<br />点右上角「刷新跌停池」再试一次。` + pfEmptyNote()
+      ? `当日没有取到主板跌停股。可能是非交易日、接口临时限流，或今天跌停的都是创业板 / 科创板。<br />点顶部「开始扫描全部板块」再试一次。` + pfEmptyNote()
       : `当前筛选下没有标的。切到「全部」看看，或换一天再看。` + pfEmptyNote();
     return;
   }
@@ -6050,7 +6004,7 @@ async function runDT(silent) {
     [74, '超跌位置与板块环境打分'],
     [90, '整理盘中买入 / 地天板 / 尾盘分栏…']
   ]);
-  if (!quiet) { btn.disabled = true; btn.textContent = '拉取中…'; lockScanBtns(true); }
+  if (!quiet) { if (btn) { btn.disabled = true; btn.textContent = '拉取中…'; } lockScanBtns(true); }
   $('#dtEmpty').style.display = 'none';
   const before = state.dtd ? (state.dtd.list || []).filter(inPF).length : undefined;
   const started = Date.now();
@@ -6107,11 +6061,10 @@ async function runDT(silent) {
     restoreMeta('dt');
     state.dtdLoading = false;
     if (prog) prog.stop();
-    if (!quiet) { setLoading(false); lockScanBtns(false); btn.disabled = false; btn.textContent = '刷新跌停池'; }
+    if (!quiet) { setLoading(false); lockScanBtns(false); if (btn) { btn.disabled = false; btn.textContent = '刷新跌停池'; } }
   }
 }
 
-$('#btnDT').onclick = () => { if (autoBusy('dt')) return toast('正在刷新中，稍等几秒', 1800); runDT(); };
 $$('#dtSeg button').forEach(b => {
   b.onclick = () => {
     $$('#dtSeg button').forEach(x => x.classList.remove('on'));
@@ -6201,7 +6154,7 @@ async function runLD(silent) {
     [72, '按涨停 / 连板 / 资金排出龙头'],
     [90, '整理跟随股与催化题材…']
   ]);
-  if (!quiet) { btn.disabled = true; btn.textContent = '刷新中…'; lockScanBtns(true); }
+  if (!quiet) { if (btn) { btn.disabled = true; btn.textContent = '刷新中…'; } lockScanBtns(true); }
   $('#ldEmpty').style.display = 'none';
   const before = state.ldd ? (state.ldd.list || []).length : undefined;
   const started = Date.now();
@@ -6247,11 +6200,10 @@ async function runLD(silent) {
     restoreMeta('ld');
     state.ldLoading = false;
     if (prog) prog.stop();
-    if (!quiet) { setLoading(false); lockScanBtns(false); btn.disabled = false; btn.textContent = '刷新龙头榜'; }
+    if (!quiet) { setLoading(false); lockScanBtns(false); if (btn) { btn.disabled = false; btn.textContent = '刷新龙头榜'; } }
   }
 }
 
-$('#btnLD').onclick = () => { if (autoBusy('ld')) return toast('正在刷新中，稍等几秒', 1800); runLD(); };
 ['#ldBoards', '#ldFollow'].forEach(sel => {
   $(sel).onchange = () => { if (!autoBusy('ld')) runLD(); };
 });
@@ -6330,26 +6282,41 @@ const isPhone = () => window.matchMedia('(max-width:760px)').matches;
 })();
 
 /* ------------------ 启动 ------------------ */
-/* 顶栏「开始扫描」对当前板块生效：在哪个板块就扫哪个板块，不再是固定的「一夜持股」 */
-const VIEW_RUN = {
-  scan: () => scan(false),
-  ai: () => runAI(false),
-  zt: () => runZT(false),
-  dt: () => runDT(false),
-  ld: () => runLD(false),
-  review: () => runStockSearch()   // 复盘已改为股票搜索板块
-};
-function runCurrent() {
-  // 自动重扫正占着这个板块时，手动点一下不会启动第二轮，干脆说明白，别看起来像"点了没反应"
-  if (autoBusy(state.view)) return toast('这个板块正在刷新中，稍等几秒再点', 2200);
-  const fn = VIEW_RUN[state.view];
-  if (fn) return fn();
-  toast('「战法规则」不需要扫描，切到上面的分析板块再点「开始扫描」', 2800);
+/* v1.7.3：顶栏「开始扫描」对全部板块生效——点一下，五个分析板块一起刷新。
+   各板块刷新函数用 silent=true 静默调用（不动自己的按钮/遮罩），由这里统一锁按钮、统一进度提示。 */
+const ALL_VIEW_RUN = [
+  ['一夜持股', () => scan(true)],
+  ['AI 荐股', () => runAI(true)],
+  ['涨停分析', () => runZT(true)],
+  ['跌停分析', () => runDT(true)],
+  ['龙头分析', () => runLD(true)]
+];
+let scanAllRunning = false;
+async function runAll() {
+  if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
+  scanAllRunning = true;
+  lockScanBtns(true);
+  setLoading(true, '正在刷新全部板块…', '依次扫描一夜持股 / AI / 涨停 / 跌停 / 龙头', 20);
+  const started = Date.now();
+  const steps = [18, 40, 62, 82, 92];
+  let i = 0;
+  try {
+    for (const [name, fn] of ALL_VIEW_RUN) {
+      try { await fn(); } catch (e) { /* 单板块失败不影响其余板块 */ }
+      i += 1;
+      setLoading(true, '正在刷新全部板块…', `已完成 ${name}（${i}/5）`, steps[Math.min(i - 1, steps.length - 1)]);
+    }
+    setLoading(true, '正在刷新全部板块…', '全部完成', 100);
+    setTimeout(() => setLoading(false), 500);
+    toast('五个板块已全部刷新', 2200);
+  } finally {
+    scanAllRunning = false;
+    lockScanBtns(false);
+  }
 }
+function runCurrent() { return runAll(); }
 $('#btnScan').onclick = runCurrent;
-$('#btnScan2').onclick = runCurrent;   // 手机端按钮同样对当前板块生效，不再固定一夜持股
-$('#btnScan').title = '扫描当前所在的板块';
-$('#btnScan2').title = '扫描当前所在的板块';
+$('#btnScan').title = '刷新全部板块（一夜持股 / AI / 涨停 / 跌停 / 龙头）';
 (async () => {
   renderScanCards([]);       // 手机端先落一个「尚未扫描」的卡片空态
   await loadSettings();      // 先把上次保存的参数恢复，再按这份参数扫描
