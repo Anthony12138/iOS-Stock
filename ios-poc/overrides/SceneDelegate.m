@@ -125,7 +125,7 @@ static NSString *const kPauseJS =
         self.statusLabel.hidden = NO;
         self.statusLabel.textColor = [UIColor secondaryLabelColor];
         self.statusLabel.numberOfLines = 1;
-        self.statusLabel.text = @"股票筛选系统 iOS v1.7.1 · 正在启动…";
+        self.statusLabel.text = @"股票筛选系统 iOS v1.7.2 · 正在启动…";
         self.retryButton.hidden = YES;
     });
 }
@@ -578,6 +578,12 @@ static NSString *const kPauseJS =
     self.webView.opaque = NO;
     self.webView.backgroundColor = PageBackgroundColor();
     self.webView.scrollView.backgroundColor = PageBackgroundColor();
+    // v1.7.2：禁捏合放大。页面 viewport 已写 user-scalable=no，这里再把原生
+    // UIScrollView 的缩放范围锁成 1x，双指手势/双击放大都失效（详情页仍能正常上下滚）。
+    self.webView.scrollView.minimumZoomScale = 1.0;
+    self.webView.scrollView.maximumZoomScale = 1.0;
+    self.webView.scrollView.zoomScale = 1.0;
+    self.webView.scrollView.bouncesZoom = NO;
     [vc.view addSubview:self.webView];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -586,7 +592,10 @@ static NSString *const kPauseJS =
         [self.statusLabel.trailingAnchor constraintEqualToAnchor:vc.view.trailingAnchor constant:-16],
         [self.retryButton.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:8],
         [self.retryButton.centerXAnchor constraintEqualToAnchor:vc.view.centerXAnchor],
-        [self.webView.topAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.topAnchor],
+        // v1.7.2：沉浸式状态栏——WebView 顶到屏幕最上沿，页面背景 / 顶栏自己用
+        // env(safe-area-inset-top) 躲开状态栏（见 web/index.html），状态栏文字改白色
+        // （见 patch_project.py 注入的 plist）。这样状态栏与页面同色、不再是黑条。
+        [self.webView.topAnchor constraintEqualToAnchor:vc.view.topAnchor],
         [self.webView.leadingAnchor constraintEqualToAnchor:vc.view.leadingAnchor],
         [self.webView.trailingAnchor constraintEqualToAnchor:vc.view.trailingAnchor],
         [self.webView.bottomAnchor constraintEqualToAnchor:vc.view.bottomAnchor],

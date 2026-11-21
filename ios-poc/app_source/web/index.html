@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#070A11" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -38,7 +38,8 @@
 
   /* ---------- 顶栏 ---------- */
   header{
-    height:62px;display:flex;align-items:center;gap:16px;padding:0 20px;
+    height:calc(62px + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:16px;
+    padding:env(safe-area-inset-top,0px) 20px 0;
     border-bottom:1px solid var(--line);background:rgba(9,13,20,.86);
     backdrop-filter:blur(14px);position:sticky;top:0;z-index:60;
   }
@@ -242,18 +243,26 @@
     visibility:hidden;
   }
   .drawer.on{transform:none;visibility:visible}
-  .dhead{padding:16px 18px 12px;border-bottom:1px solid var(--line);position:relative}
+  .dhead{padding:calc(16px + env(safe-area-inset-top,0px)) 18px 12px;border-bottom:1px solid var(--line);position:relative}
   .dhead .row1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .dhead h2{font-size:19px;font-weight:700;letter-spacing:.5px}
   .dhead .code{font-size:11.5px;color:var(--muted2);letter-spacing:1px}
   .dclose{
-    position:absolute;top:14px;right:14px;width:28px;height:28px;border-radius:8px;border:1px solid var(--line2);
+    position:absolute;top:calc(14px + env(safe-area-inset-top,0px));right:14px;width:28px;height:28px;border-radius:8px;border:1px solid var(--line2);
     background:var(--panel2);cursor:pointer;display:grid;place-items:center;color:var(--muted);font-size:15px;
   }
   .dclose:hover{background:var(--panel3);color:#fff}
   .dprice{display:flex;align-items:flex-end;gap:12px;margin-top:9px}
   .dprice .p{font-size:30px;font-weight:700;letter-spacing:.5px;line-height:1}
   .dprice .c{font-size:14px;font-weight:600;padding-bottom:2px}
+  /* v1.7.2：上一交易日数据标注条（整日休市 / 盘前显示，午休与收盘后不显示） */
+  .prevday{
+    display:flex;align-items:center;gap:7px;margin-top:11px;padding:8px 10px;
+    border:1px solid rgba(233,185,73,.3);border-radius:8px;background:rgba(233,185,73,.06);
+    font-size:11px;font-weight:700;color:#D8C288;line-height:1.5;
+  }
+  .prevday[hidden]{display:none}
+  .prevday svg{flex:0 0 auto}
   .dstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);margin-top:14px;border-radius:8px;overflow:hidden}
   .dstat{background:#0C1220;padding:8px 10px}
   .dstat .k{font-size:10px;color:var(--muted2)}
@@ -575,7 +584,7 @@
   /* ---------- 自动重扫设置（二级页面） ---------- */
   .sheet-mask{
     position:fixed;inset:0;background:rgba(4,7,12,.76);display:none;z-index:130;
-    padding:26px 16px;overflow-y:auto;
+    padding:calc(26px + env(safe-area-inset-top,0px)) 16px 26px;overflow-y:auto;
   }
   .sheet-mask.on{display:flex;align-items:flex-start;justify-content:center}
   .sheet{
@@ -804,7 +813,7 @@
     body::-webkit-scrollbar-track{background:transparent!important}
     /* 手机端顶栏两行：第一行照搬 PC 端的状态胶囊 + 数据源 + 时钟，
        第二行是主操作「开始扫描」和方形图标「选项」；品牌标题与 logo 全部让位。 */
-    header{height:auto;min-height:0;padding:8px 12px;gap:8px;row-gap:8px;
+    header{height:auto;min-height:0;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px;gap:8px;row-gap:8px;
            flex-wrap:wrap;align-content:center;overflow:hidden;
            background:#0A0E16;border-bottom:none}
     header .brand,header .spacer,header #btnHelp{display:none}
@@ -906,9 +915,9 @@
     .ai-stat .v{font-size:17px}
 
     .drawer{width:100%;border-left:none;box-shadow:none}
-    .dhead{padding:12px 13px 10px}
+    .dhead{padding:calc(12px + env(safe-area-inset-top,0px)) 13px 10px}
     .dhead h2{font-size:17px}
-    .dclose{top:11px;right:11px}
+    .dclose{top:calc(11px + env(safe-area-inset-top,0px));right:11px}
     .dprice .p{font-size:25px}
     .dstats{grid-template-columns:repeat(2,1fr)}
     .dtabs{padding:8px 10px 0;overflow-x:auto;scrollbar-width:none}
@@ -1613,6 +1622,11 @@
       <span class="c num" id="dPct">—</span>
       <span class="pill" id="dGrade" style="height:22px;margin-bottom:3px">—</span>
       <span class="buy-badge no" id="dBuyBadge" style="margin-bottom:3px">不推荐买入</span>
+    </div>
+    <!-- v1.7.2：整日休市 / 盘前用上一交易日快照时，mark 一下数据日期，避免误读成今日实时 -->
+    <div class="prevday" id="dPrevDay" hidden>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="#E9B949" stroke-width="1.8"/><path d="M12 7v5l3.5 2" stroke="#E9B949" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span id="dPrevDayText">已休市，此为上一交易日数据</span>
     </div>
     <div class="dstats">
       <div class="dstat"><div class="k">量比</div><div class="v num" id="dVr">—</div></div>
@@ -3436,6 +3450,19 @@ function syncQuoteStats(d, item) {
   set('#dAmt', numOrDash((Number(q.amount) || 0) / 1e8, 2, ' 亿'), 'flat');
 }
 
+/* v1.7.2：后端在整日休市 / 盘前用上一交易日快照时给 prev_day（MM-DD），
+   这里弹「已休市，此为上一交易日数据（MM-DD）」；午休 / 收盘后 prev_day 为空，
+   隐藏标注——那时数据本就是今天的，不该误导用户。 */
+function syncPrevDay(d) {
+  const box = $('#dPrevDay');
+  if (!box) return;
+  const day = String((d && d.prev_day) || '');
+  if (!day) { box.hidden = true; return; }
+  const txt = $('#dPrevDayText');
+  if (txt) txt.textContent = '已休市，此为上一交易日数据（' + day + '）';
+  box.hidden = false;
+}
+
 function liveTick(item, market) {
   if (!state.selected || state.selected !== item.code) { stopLive(); return; }
   const tickSeq = state.detailSeq || 0;   // 与 openDetail/closeDetail 共用作废序号
@@ -3546,6 +3573,7 @@ async function openDetail(code, market) {
   state.selected = code;
   state.curItem = item;
   state.detail = null;
+  syncPrevDay(null);   // v1.7.2：换股先收起上一只票的上一交易日标注，等新数据回来再判定
   // 记住主页面滚动位置并锁住滚动，退出时原样还原（见 closeDetail）
   state.scrollBeforeDetail = document.body.scrollTop || document.documentElement.scrollTop || 0;
   document.documentElement.classList.add('drawer-open');
@@ -3842,7 +3870,8 @@ function renderDetailPane(item, d) {
   // 列表卡片下次重绘与详情同源，不会再出现两套数字。
   if (d && d.trade) item.trade = d.trade;
   if (d && d.metrics && typeof d.metrics === 'object' && Object.keys(d.metrics).length) item.metrics = d.metrics;
-  syncQuoteStats(d, item);
+  syncQuoteStats(d, item);   // v1.7.2：上一交易日快照也填今开/最高/最低/成交额
+  syncPrevDay(d);            // v1.7.2：整日休市/盘前弹标注，午休/收盘后隐藏
   const body = $('#dBody');
   const isAI = !!(item.rules && item.rules.tech);
   if (state.dtab === 'dims') { body.innerHTML = dimsPaneHtml(item); return; }

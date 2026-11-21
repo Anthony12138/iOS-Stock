@@ -6,6 +6,7 @@
   3) 给 Info.plist 注入 NSAppTransportSecurity 例外，允许 http://127.0.0.1
   4) 改 App 显示名为「股票筛选系统」（CFBundleDisplayName / CFBundleName）
   5) 安装 App 图标：assets/AppIcon-1024.png → AppIcon.appiconset + 登记 Contents.json
+  6) v1.7.2：注入沉浸式状态栏开关（白色文字 / 不隐藏），配合边缘到边缘 WebView
 
 用法：python3 patch_project.py <解压出的 testbed 目录> <overrides 目录>
   - app.py 与 web/ 的来源固定取「本脚本所在目录/app_source」，
@@ -58,6 +59,12 @@ plist["NSAppTransportSecurity"] = {
     "NSAllowsArbitraryLoads": True,
     "NSAllowsLocalNetworking": True,
 }
+# v1.7.2：沉浸式状态栏。WKWebView 顶到屏幕最上沿（见 SceneDelegate.m），
+# 页面背景是深色 #070A11，状态栏文字用白色才能看清、与页面连成一体。
+# 关闭「由 VC 管理状态栏」后下面两个全局开关才生效。
+plist["UIViewControllerBasedStatusBarAppearance"] = False
+plist["UIStatusBarStyle"] = "UIStatusBarStyleLightContent"
+plist["UIStatusBarHidden"] = False
 with open(plist_path, "wb") as f:
     plistlib.dump(plist, f)
 print("patched plist: name =", APP_NAME, "| ATS:", plist_path)

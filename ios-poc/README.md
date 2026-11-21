@@ -34,7 +34,9 @@
 | `ios-upload.zip` | 本目录完整打包，直接解压覆盖上传到 GitHub 仓库即可 |
 | `.github/workflows/build.yml` | 云编译：下载 Python 包→打补丁→archive→打包 ipa→上传 |
 
-**PC 端一行没动。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.7.0）。App 显示名「股票筛选系统」、图标与 PC 端一致。
+**PC 端同源升级。** 源码同步来源：桌面版 `app.py` 与 `web/index.html`（v1.7.2）。App 显示名「股票筛选系统」、图标与 PC 端一致。
+
+v1.7.2 iOS 变更：①详情在周末/节假日/盘前用上一交易日快照并弹标注（午休/收盘后不弹）；②禁 WKWebView 捏合放大；③沉浸式状态栏（WebView 顶到屏幕沿 + 白色状态栏文字 + 页面 safe-area 避让，由 `patch_project.py` 注入 plist）。
 
 ---
 

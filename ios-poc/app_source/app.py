@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.1"
+VERSION = "1.7.2"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -7146,19 +7146,37 @@ class Handler(BaseHTTPRequestHandler):
                     # 停牌股三个分时源全空会抛 EmptyData：分时缺失不该把
                     # 已成功拿到的日K一起拖成 500，降级为无分时即可。
                     tr = {}
-                # 只认今天的快照：周末/盘前接口会回吐上一交易日的定格值，
-                # 拿它合成今日K会把整段历史抬高一天，昨收也会跟着错。
-                fresh_q = bool(q and q.get("date") == today and q.get("price", 0) > 0)
+                # v1.7.2：区分「今日实时快照」与「上一交易日定格快照」。
+                #   旧逻辑只认 date==today：周末/节假日/盘前接口回吐的是上一交易日
+                #   定格值，被直接丢弃 -> quote=None，今开/最高/最低/成交额全变「—」，
+                #   昨收又退成 bars[-1] 自身收盘 -> 顶部涨幅误显示 +0.00%。
+                #   现在：整日休市(周末/节假日)与盘前/集合竞价改用上一交易日快照填数据，
+                #   并由 prev_day 告诉前端弹「已休市，此为上一交易日数据」标注；
+                #   午间休市(break)、15:00 后收盘(closed·已收盘)的快照就是今天的，
+                #   仍走 fresh_q 正常路径，不弹标注。
+                #   注意：无论哪种快照都只用它取昨收/顶部数据，绝不拿旧快照合成今日K，
+                #   否则会把整段历史抬高一天。
+                mst = market_status()
+                mstate = mst.get("state")
+                # 整日无交易：周末 / 节假日（休市），或盘前 / 集合竞价（未开盘）
+                day_off = (mstate == "pre") or (mstate == "closed" and "休市" in (mst.get("text") or ""))
+                q_price = float((q or {}).get("price") or 0)
+                q_date = str((q or {}).get("date") or "")
                 prev_close = float((q or {}).get("prev_close") or 0)
+                fresh_q = bool(q_price > 0 and q_date == today and not day_off)
+                # 上一交易日定格快照：整日休市/盘前拿到的非今日快照，用来填顶部数据
+                stale_q = bool(q_price > 0 and prev_close > 0 and not fresh_q and day_off)
                 tr = dict(tr) if tr else {}          # cached() 共享对象，禁止原地写
                 tr_day = tr.get("date") or ""
                 tr_today = (not tr_day) or tr_day == today
-                # 昨收：优先今日快照；否则按「日K最后一根是不是今天」决定取哪一根。
-                # 不能无条件用 bars[-2]——日K滞后时那是上上个交易日收盘。
-                if fresh_q and prev_close > 0 and tr_today:
+                # 昨收：今日快照优先；上一交易日定格快照用其自带昨收（那天的真实前收），
+                # 让顶部涨幅 / 分时百分比都按上一交易日真实涨跌显示，而不是 0.00%。
+                if fresh_q and prev_close > 0:
                     tr["prev_close"] = prev_close
                     if not tr_day:
                         tr["date"] = today
+                elif stale_q:
+                    tr["prev_close"] = prev_close
                 elif not tr.get("prev_close"):
                     if len(bars) >= 2 and bars[-1].get("date") == today:
                         tr["prev_close"] = bars[-2]["close"]
@@ -7166,6 +7184,7 @@ class Handler(BaseHTTPRequestHandler):
                         tr["prev_close"] = bars[-1]["close"]
                 tr = _annotate_trend(tr) if tr.get("points") else tr
                 # 补当日K：实时快照优先，其次用今日实时分时合成；只在确认是今日数据时补。
+                # stale_q 绝不补——旧快照合成今日K会把历史抬高一天。
                 tb = None
                 if fresh_q:
                     tb = _today_bar(q, today, prev_close)
@@ -7198,8 +7217,16 @@ class Handler(BaseHTTPRequestHandler):
                             trade = trade_plan("night" if mode == "scan" else mode, bars, _px)
                     except Exception:
                         trade = None
+                # v1.7.2：上一交易日定格快照时给出真实交易日日期（MM-DD），
+                # 前端据此弹「已休市，此为上一交易日数据（MM-DD）」；午休/收盘后为空。
+                prev_day = ""
+                if stale_q:
+                    pd = q_date if (q_date and q_date != today) else str((bars[-1].get("date") if bars else "") or "")
+                    if len(pd) >= 10:
+                        prev_day = pd[5:10]
                 resp = {"ok": True, "code": code, "kline": bars, "trends": tr,
-                        "quote": q if fresh_q else None,
+                        "quote": q if (fresh_q or stale_q) else None,
+                        "prev_day": prev_day,
                         "trade": trade, "metrics": detail_metrics(bars)}
                 # v1.6.7：所有板块的详情分时都叠加上证指数（以前只有 scan 取）。
                 # 与个股分时同一时刻口径，缓存 60 秒全站复用，多这一次请求基本无感；
