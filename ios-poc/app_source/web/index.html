@@ -457,6 +457,10 @@
   .ai-top{display:flex;align-items:center;gap:8px;position:relative;margin-bottom:10px}
   .ai-name{font-size:15.5px;font-weight:700;letter-spacing:.3px;color:#F0F4FB;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ai-code{font-size:11px;color:var(--muted2);letter-spacing:.9px}
+  /* v1.7.6：代码在上、行业在下，两行水平居中（行业无数据时只显示代码一行） */
+  .ai-code2{display:flex;flex-direction:column;align-items:center;line-height:1.3;flex:0 0 auto;min-width:0}
+  .ai-code2 .cd{font-size:11px;color:var(--muted2);letter-spacing:.9px}
+  .ai-code2 .ind{font-size:10.5px;color:#9FAFC6;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ai-score{margin-left:auto;display:flex;align-items:center;gap:5px}
   .ai-score b{font-size:16px;color:var(--gold);font-family:"DIN Alternate",Consolas,monospace}
   .ai-score small{font-size:9.5px;color:var(--muted2)}
@@ -471,13 +475,17 @@
     display:flex;align-items:flex-start;gap:13px;margin-top:11px;padding-top:9px;
     border-top:1px solid rgba(255,255,255,.05);font-size:10.5px;color:var(--muted2);
   }
-  /* v1.7.6：涨幅为主视觉放大到 16px 带涨跌色，股价 12px 白字作次要信息，两行排列 */
-  .ai-quote{display:flex;flex-direction:column;flex:0 0 auto;line-height:1.12;min-width:66px}
+  /* v1.7.6：涨幅为主视觉放大到 16px 带涨跌色，股价 12px 白字居中作次要信息，两行排列 */
+  .ai-quote{display:flex;flex-direction:column;flex:0 0 auto;line-height:1.12;min-width:66px;text-align:center}
   .ai-quote .pct{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:.2px}
   .ai-quote .px{font-size:12px;font-weight:500;color:#E8EDF7;font-variant-numeric:tabular-nums;margin-top:3px}
-  .ai-foot .meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px 9px;flex:1 1 auto;min-width:0;padding-top:2px}
-  .dims{display:flex;gap:3px;margin-left:auto}
+  .ai-foot .meta{display:flex;flex-wrap:wrap;align-content:center;align-items:center;gap:5px 9px;flex:1 1 auto;min-width:0;padding-top:2px}
+  /* 维度条独立最右 + 竖线边界，指标文字只在自己的区域换行，不再越到指示器上方 */
+  .ai-foot .dims-wrap{display:flex;align-items:center;flex:0 0 auto;padding-left:9px;border-left:1px solid rgba(255,255,255,.1)}
+  .dims{display:flex;gap:3px}
   .dims i{width:15px;height:3px;border-radius:2px;display:block}
+  /* 指标数字上色：方向性涨跌幅红涨绿跌，中性数字亮白 */
+  .ai-foot .meta b.up{color:var(--up)} .ai-foot .meta b.down{color:var(--down)} .ai-foot .meta b.num2{color:#E8EDF7;font-weight:600}
   .ai-empty{padding:60px 20px;text-align:center;color:var(--muted2);font-size:12.5px;line-height:2}
   /* 切换算法时的即时反馈条：正常文档流，不覆盖任何卡片内容。
      复核完成 3 秒后自动收起，下面的网格随之回到原位。 */
@@ -1969,6 +1977,15 @@ const fmt = {
   money: v => (v == null || !isFinite(+v)) ? '—' : (Math.abs(+v) >= 1 ? (+v).toFixed(2) + '亿' : (+v * 10000).toFixed(0) + '万'),
   yi: v => v == null ? '—' : v.toFixed(1) + '亿'
 };
+/* v1.7.6：卡片指标数字。带方向（涨跌/偏离）按红涨绿跌上色；中性数字亮白。 */
+function metricVal(v, opt) {
+  opt = opt || {};
+  if (v == null || !isFinite(Number(v))) return '<b class="num2">—</b>';
+  const n = Number(v);
+  const txt = (opt.plus && n > 0 ? '+' : '') + n.toFixed(opt.digits == null ? 1 : opt.digits) + (opt.unit || '');
+  if (opt.neutral) return `<b class="num2">${txt}</b>`;
+  return `<b class="${fmt.cls(n)}">${txt}</b>`;
+}
 
 /* 统一 fetch 包装：AbortController 超时，异常一律抛给调用方 catch。
    五板块扫描要抓全市场快照 + 几十只票的日K/分时，慢网下常超过 1 分钟，
@@ -2833,7 +2850,7 @@ function renderScanCards(arr) {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code">${esc(x.code)}</span>
+        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
         ${buyBadgeHtml(x)}
         ${x._fast ? '<span class="ai-flag" title="用上次扫描已缓存的日K/分时，按完整评分标准筛选得出；未额外联网">缓存换算</span>' : ''}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
@@ -2848,15 +2865,14 @@ function renderScanCards(arr) {
           <span class="px num">${numOrDash(x.price, 2)}</span>
         </div>
         <div class="meta">
-        ${x.industry ? `<span>${esc(x.industry)}</span>` : ''}
         ${x.metrics && x.metrics.rsi14 != null ? `<span title="Wilder RSI(14)">RSI ${esc(x.metrics.rsi14)}</span>` : ''}
         ${x.metrics && x.metrics.mfi14 != null ? `<span title="资金流量指标 MFI(14)">MFI ${esc(x.metrics.mfi14)}</span>` : ''}
         ${x.metrics && x.metrics.adx != null ? `<span title="ADX 趋势强度：>25 趋势 / <20 震荡">ADX ${esc(x.metrics.adx)}</span>` : ''}
         ${x.metrics && x.metrics.chip_res != null ? `<span title="上方筹码峰压力位">压力 ${esc(x.metrics.chip_res)}</span>` : ''}
         ${x.metrics && x.metrics.chip_sup != null ? `<span title="下方筹码峰支撑位">支撑 ${esc(x.metrics.chip_sup)}</span>` : ''}
         ${x.metrics && x.metrics.bw_rank != null ? `<span title="布林带宽近 60 日分位">带宽 ${esc(x.metrics.bw_rank)}%</span>` : ''}
-        <div class="dims">${dims}</div>
         </div>
+        <div class="dims-wrap"><div class="dims">${dims}</div></div>
       </div>
     </article>`;
   }).join('');
@@ -5617,7 +5633,7 @@ function renderAI() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code">${esc(x.code)}</span>
+        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
         ${buyBadgeHtml(x)}
         ${x._fast ? '<span class="ai-flag" title="用上次扫描缓存的日K换算，完整复核后自动替换">缓存换算</span>' : ''}
         ${x._new ? '<span class="ai-flag new" title="完整口径复核后新进入榜单">复核新进</span>' : ''}
@@ -5641,8 +5657,8 @@ function renderAI() {
         ${x.metrics && x.metrics.chip_res != null ? `<span title="上方筹码峰压力位">压力 ${esc(x.metrics.chip_res)}</span>` : ''}
         ${x.metrics && x.metrics.chip_sup != null ? `<span title="下方筹码峰支撑位">支撑 ${esc(x.metrics.chip_sup)}</span>` : ''}
         ${x.metrics && x.metrics.bw_rank != null ? `<span title="布林带宽近 60 日分位">带宽 ${esc(x.metrics.bw_rank)}%</span>` : ''}
-        <div class="dims">${dims}</div>
         </div>
+        <div class="dims-wrap"><div class="dims">${dims}</div></div>
       </div>
     </article>`;
   }).join('');
@@ -5678,7 +5694,7 @@ function renderSearch() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code">${esc(x.code)}</span>
+        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
         ${buyBadgeHtml(x)}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
@@ -5696,8 +5712,8 @@ function renderSearch() {
         ${x.metrics && x.metrics.rsi14 != null ? `<span title="Wilder RSI(14)">RSI ${esc(x.metrics.rsi14)}</span>` : ''}
         ${x.metrics && x.metrics.mfi14 != null ? `<span title="资金流量 MFI(14)">MFI ${esc(x.metrics.mfi14)}</span>` : ''}
         ${x.metrics && x.metrics.adx != null ? `<span title="ADX 趋势强度">ADX ${esc(x.metrics.adx)}</span>` : ''}
-        <div class="dims">${dims}</div>
         </div>
+        <div class="dims-wrap"><div class="dims">${dims}</div></div>
       </div>
     </article>`;
   }).join('');
@@ -6080,7 +6096,7 @@ function renderZT() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code">${esc(x.code)}</span>
+        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
         ${buyBadgeHtml(x)}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
@@ -6104,8 +6120,12 @@ function renderZT() {
         </div>
         <div class="meta">
         <span>首封 ${esc(x.first || '—')}</span>
-        <div class="dims">${dims}</div>
+        <span>封占流通 ${metricVal(x.seal_pct, {neutral:true, digits:2, unit:'%'})}</span>
+        <span>同题材涨停 ${metricVal(x.peers, {neutral:true, digits:0, unit:' 家'})}</span>
+        <span>20日 ${metricVal(x.metrics && x.metrics.gain20, {plus:true, digits:1, unit:'%'})}</span>
+        <span>60日分位 ${metricVal(x.metrics && x.metrics.pos60, {neutral:true, digits:0, unit:'%'})}</span>
         </div>
+        <div class="dims-wrap"><div class="dims">${dims}</div></div>
       </div>
     </article>`;
   };
@@ -6253,7 +6273,7 @@ function renderDT() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code">${esc(x.code)}</span>
+        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
         ${buyBadgeHtml(x)}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
@@ -6276,9 +6296,12 @@ function renderDT() {
           <span class="px num">${numOrDash(x.price, 2)}</span>
         </div>
         <div class="meta">
-        <span>跌停价 ${numOrDash(x.plan && x.plan.dp_price, 2, ' 元')}</span>
-        <div class="dims">${dims}</div>
+        <span>封占流通 ${metricVal(x.seal_pct, {neutral:true, digits:2, unit:'%'})}</span>
+        <span>同行业涨停 ${metricVal(x.peers_zt, {neutral:true, digits:0, unit:' 家'})}</span>
+        <span>20日 ${metricVal(x.metrics && x.metrics.gain20, {plus:true, digits:1, unit:'%'})}</span>
+        <span>偏离MA20 ${metricVal(x.metrics && x.metrics.dist20, {plus:true, digits:1, unit:'%'})}</span>
         </div>
+        <div class="dims-wrap"><div class="dims">${dims}</div></div>
       </div>
     </article>`;
   };

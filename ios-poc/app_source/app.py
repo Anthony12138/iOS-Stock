@@ -4634,7 +4634,18 @@ def limit_analysis(params):
         "broken_rate": broken_rate,
         "zb_count": zb, "zb_known": zb_known,
         "market_max_boards": max_boards,
+        "day": day,   # v1.7.6：数据日（休市日为上一交易日），判断日K是否含当日要用它而非 now_cn()
     }
+
+    # v1.7.6：涨停池主源（同花顺）不带行业，用快照补 code→industry 映射，供卡片代码下方显示
+    ind_map = {}
+    try:
+        _snap = fetch_snapshot()
+        for q in (_snap.get("rows") or []):
+            if q.get("industry"):
+                ind_map[q.get("code")] = q["industry"]
+    except Exception:
+        pass
 
     rows = []
     for x in pool:
@@ -4642,7 +4653,10 @@ def limit_analysis(params):
             continue
         if is_bad_name(x["name"], True) or bad_symbol(x["name"]):
             continue
-        rows.append(_norm_pool_row(dict(x)))   # 不改 cached() 里的共享池对象
+        row = _norm_pool_row(dict(x))          # 不改 cached() 里的共享池对象
+        if not row.get("industry"):
+            row["industry"] = ind_map.get(x["code"], "")
+        rows.append(row)
 
     results, errors = [], 0
 
@@ -4948,8 +4962,10 @@ def zt_evaluate(x, bars, ctx=None):
         if s not in picked and not (s[1] == "板块" and reason):
             picked.append(s)
 
-    # 日K含今日时前收=bars[-2]；盘中日K滞后一天时 bars[-1] 才是昨收
-    if n >= 2 and str(bars[-1].get("date") or "") == now_cn().strftime("%Y-%m-%d"):
+    # v1.7.6：判断日K是否含"当日"必须用数据日 day（休市日为上一交易日），
+    # 不能用 now_cn() 今天——否则周末休市时匹配失败，把涨停当天收盘当成昨收二次打折。
+    _data_day = str(ctx.get("day") or now_cn().strftime("%Y-%m-%d"))
+    if n >= 2 and str(bars[-1].get("date") or "") == _data_day:
         prev_close = bars[-2]["close"]
     elif bars:
         prev_close = bars[-1]["close"]
@@ -4983,7 +4999,7 @@ def zt_evaluate(x, bars, ctx=None):
         "price": round(x["price"], 2), "prev_close": round(prev_close, 2),
         "pct": round(x["pct"], 2), "turnover": round(tr, 2),
         "volratio": 0, "fcap": round(x["fcap"], 1), "amount": round(x["amount"], 2),
-        "main_net": None, "industry": "", "pe": 0, "pb": 0,
+        "main_net": None, "industry": str(x.get("industry") or ""), "pe": 0, "pb": 0,
         "high": last["high"], "low": last["low"], "open": last["open"],
         "score": round(total, 1), "grade": grade,
         "boards": boards, "reason": reason, "ztype": x.get("ztype") or "",
@@ -5098,7 +5114,8 @@ def limit_down_analysis(params):
     hm = now_cn().strftime("%H:%M")
     session = "intraday" if (market_status()["state"] == "open" and hm < "14:30") else "closed"
     ctx = {"ind_dt": ind_dt, "ind_zt": ind_zt, "market_dt": total_all,
-           "market_zt": market_zt, "session": session}
+           "market_zt": market_zt, "session": session,
+           "day": day}   # v1.7.6：数据日（休市日为上一交易日），判断日K是否含当日要用它而非 now_cn()
 
     rows = []
     for x in pool:
@@ -5197,7 +5214,9 @@ def dt_evaluate(x, bars, ctx=None):
     lim = limit_pct(x["code"], x.get("name", ""))
     # 用日K的真实前收，别用「现价 ÷ (1+涨跌幅)」反推（涨跌幅本身已四舍五入）；
     # 日K含今日时前收=bars[-2]，盘中滞后一天时 bars[-1] 才是昨收
-    _today = now_cn().strftime("%Y-%m-%d")
+    # v1.7.6：用数据日 day 而非 now_cn() 今天判断日K是否含当日——
+    # 周末休市取上一交易日名单时，today 匹配失败会把跌停当天收盘当昨收二次打折、误判撬板。
+    _today = str(ctx.get("day") or now_cn().strftime("%Y-%m-%d"))
     if n >= 2 and str(bars[-1].get("date") or "") == _today and bars[-2]["close"] > 0:
         prev_close = bars[-2]["close"]
     elif bars and bars[-1]["close"] > 0:
