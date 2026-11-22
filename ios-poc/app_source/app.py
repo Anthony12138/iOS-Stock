@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.6"
+VERSION = "1.7.7"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -6979,7 +6979,7 @@ SETTINGS_KEYS = (
     "gain_min", "gain_max", "vr_min", "turn_min", "turn_max",
     "fcap_min", "fcap_max", "vol_cv_max", "min_amount", "min_amount_on", "score_min",
     "entry_time", "exclude_st", "switches", "preset", "ai", "swing", "limit",
-    "dim_common", "dim_night",
+    "dim_common", "dim_night", "api_key", "monitor_auto",
 )
 
 
@@ -7516,6 +7516,140 @@ def leader_analysis(params):
                 "elapsed": round(time.time() - t0, 1)}
 
 
+# ---------------------------------------------------------------- 异动监控（同花顺扶摇主源 + 自算兜底）
+_FUYAO_HOST = "https://fuyao.aicubes.cn"
+_FUYAO_PATH = "/api/a-share/special-data/abnormal-monitor-list"
+
+
+def _ms_date(v):
+    """毫秒时间戳 → YYYY-MM-DD；扶摇返回的是毫秒，异常值回退空串。"""
+    try:
+        n = int(v)
+        if n <= 0:
+            return ""
+        return datetime.fromtimestamp(n / 1000).strftime("%Y-%m-%d") if n > 1e11 \
+            else datetime.fromtimestamp(n).strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
+def _fuyao_monitor(key, size=60):
+    """请求扶摇异动监控名单。返回 (state, items, msg)。
+       state: ok / invalid / missing / error。"""
+    if not key:
+        return "missing", [], "未配置 API Key"
+    url = _FUYAO_HOST + _FUYAO_PATH + "?state=current&page=1&size=%d" % int(size)
+    hdr = dict(HEADERS)
+    hdr["X-API-Key"] = str(key)
+    try:
+        txt = http_text(url, timeout=8, retries=1, headers=hdr)
+        d = json.loads(txt)
+        code = d.get("code")
+        if code == 0:
+            items = ((d.get("data") or {}).get("item")) or []
+            return "ok", items, ""
+        if code == 2003:
+            msg = str(d.get("message") or "")
+            return ("missing" if "Missing" in msg else "invalid"), [], msg
+        return "error", [], str(d.get("message") or code)
+    except Exception as e:
+        return "error", [], "%s: %s" % (type(e).__name__, e)
+
+
+def _selfcalc_deviate(limit=30):
+    """自算兜底：个股当日涨幅 - 上证当日涨幅 = 偏离值（近似口径）。
+       返回按绝对偏离值排序的列表。"""
+    try:
+        idx_bars = fetch_kline("000001", 1, 3) or []
+        idx_pct = float(idx_bars[-1].get("pct") or 0) if idx_bars else 0.0
+    except Exception:
+        idx_pct = 0.0
+    try:
+        snap = fetch_snapshot(force=False) or {}
+        rows = snap.get("rows") or []
+    except Exception:
+        rows = []
+    out = []
+    for r in rows:
+        try:
+            code = str(r.get("code") or "")
+            name = str(r.get("name") or "")
+            pct = float(r.get("pct") or 0)
+        except Exception:
+            continue
+        if not code or len(code) != 6:
+            continue
+        dev = pct - idx_pct
+        out.append({"code": code, "name": name, "pct": round(pct, 2),
+                    "dev": round(dev, 2), "threshold": 7.0,
+                    "hit": abs(dev) >= 7.0, "industry": str(r.get("industry") or "")})
+    out.sort(key=lambda x: abs(x["dev"]), reverse=True)
+    return out[:limit]
+
+
+def monitor_data(params=None):
+    """异动监控：严重异动 / 热门股偏离值 / 重点监控（监管期）。
+       同花顺扶摇为主源；Key 失效/缺失时返回 auth 状态供前端弹窗提醒，
+       数据切自算兜底，保证板块不出空。"""
+    t0 = time.time()
+    key = ""
+    try:
+        key = str(load_settings().get("api_key") or "").strip()
+    except Exception:
+        pass
+    want = 60
+    try:
+        want = max(10, min(int((params or {}).get("size", 30)), 30))  # 扶摇 size 上限约 30~49，取 30 稳妥
+    except Exception:
+        pass
+
+    state, items, msg = _fuyao_monitor(key, want)
+    auth = "ok" if state == "ok" else state
+
+    severe, watch = [], []
+    if state == "ok":
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            code = str(it.get("thscode") or "").split(".")[0]
+            # 本工具只做主板：60xxxx / 00xxxx，剔除科创(688)/创业(30)/转债(11)/北交(8/4)
+            if not (code.startswith("60") or code.startswith("00")) or len(code) != 6:
+                continue
+            label = str(it.get("monitor_label") or "")
+            row = {"code": code, "name": str(it.get("name") or ""),
+                   "label": label, "type": it.get("monitor_type"),
+                   "start": _ms_date(it.get("start_date_ms")),
+                   "end": _ms_date(it.get("end_date_ms"))}
+            if "严重异动" in label or it.get("monitor_type") == 2:
+                severe.append(row)
+            watch.append(row)
+        # 同一只可能多条：按代码去重，保留起止日期最新的
+        def _dedup(seq):
+            seen, out = {}, []
+            for r in seq:
+                if r["code"] in seen:
+                    continue
+                seen[r["code"]] = 1
+                out.append(r)
+            return out
+        severe, watch = _dedup(severe), _dedup(watch)
+
+    deviate = _selfcalc_deviate()
+    data_date = last_trade_date()
+    try:
+        snap = fetch_snapshot(force=False) or {}
+        if snap.get("data_date"):
+            data_date = snap["data_date"]
+    except Exception:
+        pass
+
+    return {"ok": True, "mode": "monitor", "auth": auth,
+            "auth_msg": msg, "source": "fuyao" if state == "ok" else "fallback",
+            "severe": severe, "deviate": deviate, "watch": watch,
+            "date": data_date, "elapsed": round(time.time() - t0, 1),
+            "market": market_status()}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -7587,6 +7721,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "version": VERSION, "market": market_status(),
                                    "auto_exit": not LIGHT,   # PC=True：前端据此注册关页退出
                                    "server_time": now_cn().strftime("%Y-%m-%d %H:%M:%S")})
+
+            if path == "/api/monitor":   # 异动监控：同花顺扶摇主源 + 自算兜底
+                return self._json(monitor_data({k: v[0] for k, v in qs.items()}))
 
             if path == "/api/bye":   # sendBeacon 不可用时的 GET 兜底
                 schedule_bye_exit()
