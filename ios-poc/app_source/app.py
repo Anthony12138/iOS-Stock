@@ -39,7 +39,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.5"
+VERSION = "1.7.6"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -5459,21 +5459,23 @@ DEFAULTS = {
 def market_status():
     load_holidays()
     now = now_cn()
+    # v1.7.6：day_off=True 表示「今天整日不开市」（周末/节假日），与「工作日 15:00 后收盘」
+    # 区分开——两者 state 都是 closed，但前者展示上一交易日数据，后者展示当日收盘数据。
     if now.strftime("%Y-%m-%d") in HOLIDAYS:
-        return {"state": "closed", "text": "休市 · 节假日"}
+        return {"state": "closed", "text": "休市 · 节假日", "day_off": True}
     if now.weekday() >= 5:
-        return {"state": "closed", "text": "休市 · 周末"}
+        return {"state": "closed", "text": "休市 · 周末", "day_off": True}
     hm = now.strftime("%H:%M")
     if "09:15" <= hm < "09:30":
-        return {"state": "pre", "text": "集合竞价"}
+        return {"state": "pre", "text": "集合竞价", "day_off": False}
     # 11:30 / 15:00 是收盘时点本身，不再算「交易中」；11:30 整点归入午间休市
     if "09:30" <= hm < "11:30" or "13:00" <= hm < "15:00":
-        return {"state": "open", "text": "交易中"}
+        return {"state": "open", "text": "交易中", "day_off": False}
     if "11:30" <= hm < "13:00":
-        return {"state": "break", "text": "午间休市"}
+        return {"state": "break", "text": "午间休市", "day_off": False}
     if hm < "09:15":
-        return {"state": "pre", "text": "未开盘"}
-    return {"state": "closed", "text": "已收盘"}
+        return {"state": "pre", "text": "未开盘", "day_off": False}
+    return {"state": "closed", "text": "已收盘", "day_off": False}
 
 
 def is_bad_name(name, exclude_st):

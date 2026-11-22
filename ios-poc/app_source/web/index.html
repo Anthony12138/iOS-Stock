@@ -88,6 +88,9 @@
   .btn.ghost{background:transparent}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .btn.on{border-color:rgba(233,185,73,.55);color:var(--gold);background:rgba(233,185,73,.08)}
+  /* v1.7.6：刷新键与选项键（on 态）统一为金边图标按钮；禁用时仍由 .btn:disabled 统一置灰 */
+  #btnRefresh{border-color:rgba(233,185,73,.55);color:var(--gold);background:rgba(233,185,73,.08)}
+  #btnRefresh:not(:disabled):hover{background:rgba(233,185,73,.14);border-color:rgba(233,185,73,.75)}
   .btn.sm{height:28px;padding:0 10px;font-size:11.5px;border-radius:7px}
 
   /* ---------- 全局布局 ---------- */
@@ -199,6 +202,8 @@
   tbody tr.sel{background:rgba(255,255,255,.05);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}
   tbody td{padding:9px 10px;text-align:right;border-bottom:1px solid rgba(255,255,255,.038);white-space:nowrap}
   tbody td.l{text-align:left}
+  /* v1.7.6：战法规则「指标口径」表格——全部左对齐、自动换行、字号统一，覆盖上面列表用的右对齐规则 */
+  table.spec-table tbody td{text-align:left;white-space:normal;vertical-align:top;font-size:11.5px}
   .nm{font-weight:600;color:#EDF2FA}
   .cd{font-size:10.5px;color:var(--muted2);letter-spacing:.6px}
   .ind{font-size:10px;color:var(--muted2);margin-left:5px}
@@ -1626,8 +1631,8 @@
       <div style="font-size:11.5px;color:#7C8798;margin:6px 0 10px">
         同一只票在不同板块里的分数没有可比性 —— 它们衡量的是完全不同的东西。
       </div>
-      <div style="overflow-x:auto">
-        <table style="width:100%;min-width:640px;border-collapse:collapse;font-size:11.5px;color:#9AA6BA">
+      <div style="overflow-x:auto;-webkit-text-size-adjust:100%;text-size-adjust:100%">
+        <table class="spec-table" style="width:100%;min-width:640px;border-collapse:collapse;font-size:11.5px;color:#9AA6BA;table-layout:fixed">
           <thead>
             <tr style="color:#C9D2E2">
               <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #1E2836;width:96px">场景</th>
@@ -1639,8 +1644,8 @@
           <tbody>
             <tr>
               <td style="padding:8px;border-bottom:1px solid #16202E;color:#E9B949">一夜持股</td>
-              <td style="padding:8px;border-bottom:1px solid #16202E">8 条硬条件<br />12/12/12/10/14/16/14/10</td>
-              <td style="padding:8px;border-bottom:1px solid #16202E">涨幅 3~5% · 量比≥1 · 换手 5~10% · 市值 50~200 亿 · 量能平稳 · 均线不压制 · 分时站均价线 · 14:30 后新高</td>
+              <td style="padding:8px;border-bottom:1px solid #16202E">8 项评分 12/12/12/10/14/16/14/10<br />+ 2 项硬门槛（不计分）</td>
+              <td style="padding:8px;border-bottom:1px solid #16202E">涨幅 3~5% · 量比≥1 · 换手 5~10% · 市值 50~200 亿 · 量能平稳 · 均线不压制 · ≥85% 时间站均价线 · 14:30 后接近新高<br /><b style="color:#E9B949">硬门槛：</b>≥85% 时间站均价线且跑赢上证</td>
               <td style="padding:8px;border-bottom:1px solid #16202E">估值 / 财务 / 消息面 / 连板情绪</td>
             </tr>
             <tr>
@@ -1921,6 +1926,14 @@ function vrText(v) {
   const n = Number(v);
   return (v == null || !isFinite(n) || n <= 0) ? '—' : n.toFixed(2);
 }
+/* v1.7.6：详情量比统一入口——文案与着色一起写，避免单股接口回填只改数字导致颜色滞后。
+   >0 红 / <0 绿 / 缺失或 0 中性。 */
+function setVr(el, v) {
+  if (!el) return;
+  const n = Number(v);
+  el.textContent = vrText(v);
+  el.className = 'v num ' + fmt.cls(v != null && isFinite(n) && n !== 0 ? n : 0);
+}
 function pctOrDash(v) {
   const n = Number(v);
   return (v == null || !isFinite(n)) ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%';
@@ -2048,26 +2061,32 @@ function setLoading(on, title, sub, pct) {
 }
 
 /* 顶栏扫描/刷新按钮统一锁：一个板块在跑的时候别让人再点一次。
-   v1.7.5：刷新键（btnRefresh）也纳入同一把锁，两个按钮不会互踩。
-   「刷新」只在有扫描动作的板块可用——股票搜索/战法规则没有数据源请求，置灰不可点。 */
+   v1.7.6：开始扫描 / 刷新 两键状态始终一致——扫描中一起禁用，
+   股票搜索/战法规则（无数据源请求）也一起置灰不可点。 */
+function noScanViewNow() { return state.view === 'review' || state.view === 'strategy'; }
+function scanBusyNow() {
+  return scanAllRunning || state.scanning || state.aiLoading || state.ztdLoading || state.dtdLoading || state.ldLoading;
+}
 function lockScanBtns(on) {
   const b = $('#btnScan');
-  if (b) { b.disabled = on; b.textContent = on ? '扫描中…' : '开始扫描'; }
-  const r = $('#btnRefresh');
-  if (r) {
-    const noScanView = state.view === 'review' || state.view === 'strategy';
-    r.disabled = on || noScanView;
+  if (b) b.textContent = on ? '扫描中…' : '开始扫描';
+  // v1.7.6：禁用状态一律走 syncRefreshBtn 统一口径（含 scanBusyNow），
+  // 避免 runAll 串行间隙被某个板块的 lockScanBtns(false) 错误启用。
+  if (on) {
+    const sb = $('#btnScan'); if (sb) sb.disabled = true;
+    const r = $('#btnRefresh'); if (r) r.disabled = true;
+  } else {
+    syncRefreshBtn();
   }
 }
-/* 切板块时刷新「刷新键」可用性：股票搜索 / 战法规则无扫描动作，置灰禁用 */
+/* 切板块 / 扫描状态变化时同步两键可用性：
+   股票搜索 / 战法规则无扫描动作，两键一起置灰；扫描进行中同样一起禁用。
+   v1.7.5 修复沿用：runAll 串行执行、板块间隙各 loading 都为 false 时，
+   靠 scanAllRunning 保持两键禁用，避免切板块误启用撞车。 */
 function syncRefreshBtn() {
-  const r = $('#btnRefresh');
-  if (!r) return;
-  const noScanView = state.view === 'review' || state.view === 'strategy';
-  // v1.7.5 修复：全板块扫描(runAll)串行执行、板块间隙各 loading 都为 false 时，
-  // 也必须保持刷新键禁用，否则切板块会误启用，点刷新与 runAll 撞车导致某板块被跳过仍报「已完成」。
-  const busy = scanAllRunning || state.scanning || state.aiLoading || state.ztdLoading || state.dtdLoading || state.ldLoading;
-  r.disabled = noScanView || busy;
+  const off = noScanViewNow() || scanBusyNow();
+  const b = $('#btnScan'); if (b) b.disabled = off;
+  const r = $('#btnRefresh'); if (r) r.disabled = off;
 }
 
 /* 五个板块共用同一条扫描进度浮层（就是 App 刚打开时那个）：
@@ -2271,8 +2290,10 @@ function setBanner(kind, text) {
   b.classList.add('on');
   b.textContent = text;                 // textContent 天然防注入
 }
-/* r 为板块响应（health 也复用）：source / ts / data_date / stale / degraded_fields / market */
-function syncSource(r) {
+/* r 为板块响应（health 也复用）：source / ts / data_date / stale / degraded_fields / market
+   v1.7.6：marketOnly=true 时（health 心跳）只更新 market，保留上次扫描得到的
+   stale / degraded / data_date，避免 20s 心跳把降级提示与数据日期冲掉。 */
+function syncSource(r, marketOnly) {
   r = r || {};
   if (r.env) state.env = r.env;          // 大盘环境：五板块共用
   if (r.source) curSrcName = srcShortName(r.source);
@@ -2284,23 +2305,46 @@ function syncSource(r) {
       chartMktPrev = m.state;      // health 一到就同步，开盘立即恢复图表刷新
     }
   }
-  const degraded = !!r.stale || (Array.isArray(r.degraded_fields) && r.degraded_fields.length > 0);
-  // 存原始时间戳，窗口在 PC / 手机宽度间切换时可按当前视口重新格式化
-  const raw = r.ts || r.data_date;
-  if (raw) lastSrcStamp = raw;
-  lastSrcRender = { stale: !!r.stale, degraded, market: m };
+  if (marketOnly && lastSrcRender) {
+    lastSrcRender.market = m;          // 只换市场状态，其余字段原样保留
+  } else {
+    const degraded = !!r.stale || (Array.isArray(r.degraded_fields) && r.degraded_fields.length > 0);
+    // 存原始时间戳，窗口在 PC / 手机宽度间切换时可按当前视口重新格式化
+    const raw = r.ts || r.data_date;
+    if (raw) lastSrcStamp = raw;
+    lastSrcRender = { stale: !!r.stale, degraded, market: m, data_date: r.data_date || '' };
+  }
   renderSrcPill(lastSrcRender);
-  // 休市 / 降级用 banner 兜底提示（全局可见）
+  renderMarketBanner();
+}
+/* v1.7.6：休市 / 降级 banner 独立渲染，切板块时也调用——战法规则页不显示休市提示。
+   休市文案按当日情况细分：周末/节假日(day_off) 展示上一交易日数据；
+   工作日收盘仍为当日收盘数据；午间休市保留原提示；盘前保留原提示。降级提示不变。 */
+function renderMarketBanner() {
+  const r = lastSrcRender || {};
+  const m = r.market || {};
   const notes = [];
-  // 只有盘前(pre)才是「上一交易日」；午休(break)/收盘(closed)用的都是当天数据，
-  // 直接照抄会被截图里「上一交易日收盘数据（今天日期）」自相矛盾。
-  if (m.state === 'pre') notes.push('当前为上一交易日收盘数据' + (r.data_date ? '（' + r.data_date + '）' : ''));
-  else if (m.state === 'break') notes.push('午间休市 · 数据截至 11:30' + (r.data_date ? '（' + r.data_date + '）' : ''));
-  else if (m.state === 'closed') notes.push('今日已收盘 · 展示当日收盘数据' + (r.data_date ? '（' + r.data_date + '）' : ''));
+  const date = r.data_date ? '（' + r.data_date + '）' : '';
+  // 战法规则是纯说明页，没有实时数据可标注，休市提示不显示；降级提示照常。
+  if (state.view !== 'strategy') {
+    if (m.state === 'closed' && m.day_off === true) {
+      notes.push('周末/节假日休市 · 展示上一交易日数据' + date);
+    } else if (m.state === 'pre') {
+      notes.push('当前为上一交易日收盘数据' + date);
+    } else if (m.state === 'break') {
+      notes.push('午间休市 · 数据截至 11:30' + date);
+    } else if (m.state === 'closed') {
+      notes.push('今日已收盘 · 展示当日收盘数据' + date);
+    }
+  }
   if (r.stale) notes.push('双源不可用，展示缓存快照');
-  else if (degraded) notes.push('部分字段缺失，数据降级');
+  else if (r.degraded) notes.push('部分字段缺失，数据降级');
   if (notes.length) setBanner('info', notes.join(' · '));
-  else if (m.state === 'open') clearBanner();
+  else if (m.state === 'open' || state.view === 'strategy') {
+    // v1.7.6：只撤掉 info 提示，保留 error（扫描失败）横幅，别静默吞掉失败信号
+    const b = $('#banner');
+    if (b && b.classList.contains('info')) clearBanner();
+  }
 }
 /* 健康心跳健壮性：一次抖动不该把「已收盘」翻成吓人的「服务异常」。
    - 连续 2 次失败才报异常，成功一次即清零恢复；
@@ -2336,7 +2380,8 @@ async function health(timeoutMs) {
     if (r && r.auto_exit != null) window.__autoExit = !!r.auto_exit;  // v1.7.3：PC 关页退出标志
     const m = (r && r.market) || {};
     paintHealth(m, false);
-    try { syncSource(r); } catch (e) {}                // 渲染异常不误报服务异常
+    // v1.7.6：health 只更新市场状态，别用不完整的响应冲掉板块扫描的降级提示/数据日期
+    try { syncSource(r, true); } catch (e) {}          // 渲染异常不误报服务异常
   } finally {
     healthBusy = false;
   }
@@ -3577,7 +3622,7 @@ function syncQuoteStats(d, item) {
     const vr = Number(ex.volratio);
     if (ex.volratio != null && isFinite(vr) && vr > 0) {
       item.volratio = vr;
-      const e = $('#dVr'); if (e) e.textContent = vr.toFixed(2);
+      setVr($('#dVr'), vr);   // v1.7.6：回填时文案与颜色一起更新
     }
     const nv = Number(ex.main_net);
     if (ex.main_net != null && isFinite(nv)) {
@@ -3751,7 +3796,8 @@ async function openDetail(code, market) {
     dBadge.textContent = ok ? '推荐买入' : '不推荐买入';
     dBadge.className = 'buy-badge ' + (ok ? 'yes' : 'no');
   }
-  $('#dVr').textContent = numOrDash(item.volratio, 2);
+  // v1.7.6：量比按数值着色（>0 红 / <0 绿 / 缺失或 0 中性），与列表 vrText 同一套文案口径
+  setVr($('#dVr'), item.volratio);
   $('#dTurn').textContent = numOrDash(item.turnover, 2, '%');
   $('#dFcap').textContent = numOrDash(item.fcap, 0, '亿');
   if (netKnown(item)) {
@@ -5813,7 +5859,7 @@ if ($('#aiSwingChk')) {
 }
 
 async function runAI(silent, extSignal, force) {
-  if (state.aiLoading) return;
+  if (state.aiLoading) return 'busy';   // v1.7.6：占用时返回哨兵，供 runAll 如实统计「未刷新」
   state.aiLoading = true;
   const quiet = silent === true;            // 自动重扫：不动按钮、不弹遮罩
   const btn = $('#btnAI');
@@ -6031,7 +6077,7 @@ function renderZT() {
 }
 
 async function runZT(silent, extSignal, force) {
-  if (state.ztdLoading) return;
+  if (state.ztdLoading) return 'busy';   // v1.7.6：占用时返回哨兵，供 runAll 如实统计「未刷新」
   state.ztdLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
   const btn = $('#btnZT');
@@ -6200,7 +6246,7 @@ function renderDT() {
 }
 
 async function runDT(silent, extSignal, force) {
-  if (state.dtdLoading) return;
+  if (state.dtdLoading) return 'busy';   // v1.7.6：占用时返回哨兵，供 runAll 如实统计「未刷新」
   state.dtdLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
   const btn = $('#btnDT');
@@ -6350,7 +6396,7 @@ function renderLD() {
 }
 
 async function runLD(silent, extSignal, force) {
-  if (state.ldLoading) return;
+  if (state.ldLoading) return 'busy';   // v1.7.6：占用时返回哨兵，供 runAll 如实统计「未刷新」
   state.ldLoading = true;
   const quiet = silent === true;             // 自动重扫：不动按钮、不弹长提示
   const btn = $('#btnLD');
@@ -6464,11 +6510,14 @@ $$('.tab').forEach(t => {
     // 只切 display 会让其它板块的卡片仍显示旧分数与旧徽章（看起来像开关没生效）。
     renderCurrent();
     syncRefreshBtn();   // v1.7.5：股票搜索/战法规则时刷新键置灰禁用
+    if (typeof renderMarketBanner === 'function') renderMarketBanner();  // v1.7.6：战法规则页不显示休市提示
     if (state.view === 'review') { /* 股票搜索：由搜索按钮触发，不自动请求 */ }
     // v1.6.3 并发互斥：任何板块在扫时，切板块不再自动叠加新扫描——旧逻辑会互踩
     // 取消控制器/进度浮层/按钮锁（静默自动重扫不受影响，它们不走浮层）。
     // 想看哪个板块就等当前扫描结束后手动点刷新。
-    if (!state.scanning && !state.aiLoading && !state.ztdLoading && !state.dtdLoading && !state.ldLoading) {
+    // v1.7.6：补上 scanAllRunning——runAll 串行时板块间隙各 loading 会短暂全 false，
+    // 若不挡住，切板块会叠加非静默扫描，与 runAll 互踩并抢按钮锁。
+    if (!scanAllRunning && !state.scanning && !state.aiLoading && !state.ztdLoading && !state.dtdLoading && !state.ldLoading) {
       if (state.view === 'ai' && !state.ai && !state.aiLoading) runAI();
       if (state.view === 'zt' && !state.ztd && !state.ztdLoading) runZT();
       if (state.view === 'dt' && !state.dtd && !state.dtdLoading) runDT();
