@@ -494,10 +494,23 @@
   .ai-top{display:flex;align-items:center;gap:8px;position:relative;margin-bottom:10px}
   .ai-name{font-size:15.5px;font-weight:700;letter-spacing:.3px;color:#F0F4FB;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ai-code{font-size:11px;color:var(--muted2);letter-spacing:.9px}
-  /* v1.7.6：代码在上、行业在下，两行水平居中（行业无数据时只显示代码一行） */
-  .ai-code2{display:flex;flex-direction:column;align-items:center;line-height:1.3;flex:0 0 auto;min-width:0}
-  .ai-code2 .cd{font-size:11px;color:var(--muted2);letter-spacing:.9px}
-  .ai-code2 .ind{font-size:10.5px;color:#9FAFC6;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* v1.7.8：股票名称原位不动；只有「代码在上、行业简称在下」两行居中，行业严格在代码正下方 */
+  .code-ind{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+    flex:0 0 70px;min-width:0;line-height:1.28;text-align:center}
+  .code-ind .cd{display:block;width:100%;margin:0;text-align:center;font-size:11px;color:var(--muted2);letter-spacing:.9px}
+  .code-ind .ind{display:block;width:100%;margin:2px 0 0;text-align:center;font-size:10px;color:#9FAFC6;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .code-ind.compact{flex:0 0 48px}
+  .code-ind.compact .cd{font-size:9px;letter-spacing:.3px}
+  .code-ind.compact .ind{font-size:9px;margin-top:1px}
+  /* 表格 / 复盘 / 异动：名称仍在原位左侧，代码行业块贴在名称右边 */
+  .cell-id{display:inline-flex;align-items:center;gap:7px;line-height:1.28;text-align:left;white-space:nowrap}
+  .cell-id .nm{font-size:11.5px}
+  .cell-id .code-ind{flex:0 0 66px}
+  .mon-tbl .code-ind{flex:0 0 62px}
+  .mon-tbl .code-ind .cd{font-size:9.5px;letter-spacing:.4px}
+  .mon-tbl .code-ind .ind{font-size:9px;margin-top:1px}
+  .mon-first{display:block;text-align:left}
   .ai-score{margin-left:auto;display:flex;align-items:center;gap:5px}
   .ai-score b{font-size:16px;color:var(--gold);font-family:"DIN Alternate",Consolas,monospace}
   .ai-score small{font-size:9.5px;color:var(--muted2)}
@@ -568,7 +581,8 @@
   .lt-sec{margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,.055)}
   .lt-lb{display:flex;align-items:center;gap:5px;font-size:10px;color:#6D7891;letter-spacing:.8px;margin-bottom:6px}
   .lt-lb em{font-style:normal;color:#7C8798;letter-spacing:0}
-  .lt-lead{display:flex;align-items:baseline;gap:7px;cursor:pointer}
+  .lt-lead{display:flex;align-items:center;gap:7px;cursor:pointer}
+  .lt-lead .code-ind{flex:0 0 64px}
   .lt-lname{font-size:14.5px;font-weight:700;color:#F0F4FB}
   .lt-lcode{font-size:10px;color:#5F6B80;letter-spacing:.5px}
   .lt-ltag{font-size:9.5px;line-height:17px;height:17px;padding:0 6px;border-radius:99px;
@@ -577,7 +591,7 @@
   .lt-lmeta{margin-top:5px;font-size:10.5px;color:#7C8798}
   .lt-lmeta b{font-weight:600}
   .lt-flow{display:flex;flex-wrap:wrap;gap:5px}
-  .lt-f{display:inline-flex;align-items:center;gap:5px;height:23px;padding:0 7px;border-radius:6px;cursor:pointer;
+  .lt-f{display:inline-flex;align-items:center;gap:5px;min-height:30px;padding:3px 7px;border-radius:6px;cursor:pointer;
     flex:0 0 auto;white-space:nowrap;   /* 不收缩：挤不下就整颗换行，不能把「+1.02%」裁掉半个 */
     background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);font-size:10.5px;color:#B6C1D4}
   .lt-f:hover{border-color:rgba(233,185,73,.4);color:#E4EAF5}
@@ -2061,6 +2075,60 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+/* v1.7.8：全板块统一「代码在上、行业简称在下」小组件。
+   股票名称不在组件里，保持原来的位置不动；行业最多 4 个字，过长按常用简称压缩。 */
+const IND_ALIAS = {
+  /* 东财 F10 的 INDUSTRYCSRC1 是证监会全称，先在前端压成 4 字内简称 */
+  '计算机、通信和其他电子设备制造业':'电子设备','房地产业':'房地产','商务服务业':'商务服务',
+  '电气机械和器材制造业':'电气设备','电力、热力生产和供应业':'电力','新闻和出版业':'出版',
+  '通用设备制造业':'通用设备','专用设备制造业':'专用设备','金属制品业':'金属制品',
+  '食品制造业':'食品','医药制造业':'医药','酒、饮料和精制茶制造业':'食品',
+  '软件和信息技术服务业':'软件','互联网和相关服务':'互联网','生态保护和环境治理业':'环保',
+  '铁路、船舶、航空航天和其他运输设备制造业':'交运设备','汽车制造业':'汽车',
+  '化学原料和化学制品制造业':'化工','化学纤维制造业':'化纤','非金属矿物制品业':'建材',
+  '黑色金属冶炼和压延加工业':'钢铁','有色金属冶炼和压延加工业':'有色',
+  '煤炭开采和洗选业':'煤炭','石油和天然气开采业':'石油','石油加工、炼焦和核燃料加工业':'炼化',
+  '橡胶和塑料制品业':'橡塑','仪器仪表制造业':'仪器仪表','家具制造业':'家具',
+  '造纸和纸制品业':'造纸','印刷和记录媒介复制业':'印刷','文教、工美、体育和娱乐用品制造业':'轻工',
+  '纺织服装、服饰业':'服饰','纺织业':'纺织','燃气生产和供应业':'燃气','水的生产和供应业':'水务',
+  '建筑安装业':'建筑','建筑装饰和其他建筑业':'装饰','道路运输业':'运输','航空运输业':'航空',
+  '仓储业':'仓储','批发业':'批发','零售业':'零售','住宿和餐饮业':'餐饮',
+  '货币金融服务':'金融','资本市场服务':'证券','保险业':'保险','其他金融业':'金融',
+  '农、林、牧、渔服务业':'农林牧渔','卫生和社会工作':'医疗','文化艺术业':'传媒',
+  '广播、电视、电影和影视录音制作业':'影视','教育':'教育','研究和试验发展':'科研',
+  '专业技术服务业':'专业服务','科技推广和应用服务业':'科技','居民服务、修理和其他服务业':'服务',
+  '住宿业':'住宿','餐饮业':'餐饮','娱乐业':'娱乐','社会工作':'医疗',
+  '计算机设备':'计算机','通信设备':'通信设备','半导体及元件':'半导体','光学光电子':'光学电子',
+  '电子化学品':'电子化学','汽车零部件':'零部件','医疗器械服务':'医疗器械','房地产开发':'房地产',
+  '互联网服务':'互联网','工程咨询服务':'工程咨询','非金属材料':'新材料','家用轻工':'家居',
+  '纺织服装':'纺织','酿酒行业':'酿酒','贵金属':'贵金属','化学原料':'化学原料',
+  '通用设备':'通用设备','专用设备':'专用设备','自动化设备':'自动化','消费电子':'消费电子'
+};
+function indShort(raw) {
+  let s = String(raw || '').trim().replace(/[ⅠⅡⅢⅣ]+$/g, '');
+  if (!s) return '';
+  if (IND_ALIAS[s]) return IND_ALIAS[s];
+  s = s.replace(/(行业|板块|概念|制造业|服务业)$/g, '');
+  if (!s) return '';
+  if (IND_ALIAS[s]) return IND_ALIAS[s];
+  if (s.length <= 4) return s;
+  for (const suf of ['设备','服务','制品','原料','材料','开发','制造','零售','商业','运输']) {
+    if (s.endsWith(suf) && s.length - suf.length <= 4 && s.length - suf.length >= 2) {
+      return s.slice(0, -suf.length);
+    }
+  }
+  return s.slice(0, 4);
+}
+function codeInd(x, extra) {
+  const ind = indShort(x && x.industry);
+  return '<span class="code-ind' + (extra ? ' ' + extra : '') + '"><span class="cd">'
+    + esc(x && x.code) + '</span>'
+    + (ind ? '<span class="ind">' + esc(ind) + '</span>' : '') + '</span>';
+}
+function stockCell(x) {
+  return '<span class="cell-id"><span class="nm">' + esc(x && x.name) + '</span>'
+    + codeInd(x) + '</span>';
+}
 /* 入选门槛 / 结论文案一律按「原基础分」判断。
    score_min 是 8 条硬条件的基础分门槛；卡片展示的 score 是叠加消息面 / 情绪面后的综合分，
    两者口径不同。若拿综合分去跟基础分门槛比较，开启评分维度会把本已入选的股票二次剔除，
@@ -2215,7 +2283,7 @@ function toast(msg, ms = 2000) {
 let overlayN = 0;   // v1.6.5：手动扫描遮罩用计数而非单布尔，避免两路扫描重叠时
                     // 先完成者提前关遮罩 / 提前退出胶囊「更新中」态
 /* v1.7.4：只更新遮罩文案/进度，不碰 overlayN 计数。
-   全板块扫描循环内用它刷新「已完成 N/5」，避免反复 setLoading(true) 把计数累加到关不掉。 */
+   全板块扫描循环内用它刷新「已完成 N/6」，避免反复 setLoading(true) 把计数累加到关不掉。 */
 function setLoadText(title, sub, pct) {
   if (title) $('#loadTitle').textContent = title;
   if (sub) $('#loadSub').textContent = sub;
@@ -2956,7 +3024,7 @@ function renderTable() {
       : '<span class="flat">—</span>';
     return `<tr data-code="${esc(x.code)}" data-market="${esc(x.market)}" class="${state.selected === x.code ? 'sel' : ''}">
       <td class="l cd">${String(i + 1).padStart(2, '0')}</td>
-      <td class="l"><span class="nm">${esc(x.name)}</span><span class="cd" style="margin-left:7px">${esc(x.code)}</span><span class="ind">${esc(x.industry || '')}</span></td>
+      <td class="l">${stockCell(x)}</td>
       <td class="num">${numOrDash(x.price, 2)}</td>
       <td class="num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</td>
       <td class="num">${numOrDash(x.volratio, 2)}</td>
@@ -3002,7 +3070,7 @@ function renderScanCards(arr) {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
+        ${codeInd(x)}
         ${buyBadgeHtml(x)}
         ${x._fast ? '<span class="ai-flag" title="用上次扫描已缓存的日K/分时，按完整评分标准筛选得出；未额外联网">缓存换算</span>' : ''}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
@@ -5695,7 +5763,7 @@ async function loadReview(file) {
       return `<tr>
       <td class="rev-pick-col"><input type="checkbox" class="rev-pick rpick" data-code="${esc(x.code)}"
         aria-label="选择 ${esc(x.name)}" /></td>
-      <td class="l"><span class="nm">${esc(x.name)}</span><span class="cd" style="margin-left:6px">${esc(x.code)}</span></td>
+      <td class="l">${stockCell(x)}</td>
       <td class="num"${x.buy_ok === false ? ` title="${esc(x.price_note || '挂单价不可成交')}"` : ''}>${numOrDash(x.buy_ref != null ? x.buy_ref : x.buy, 2)}${x.buy_ok === false ? '<span style="color:#F58A8C;font-size:10px"> *</span>' : ''}</td>
       <td class="num">${esc(x.score)}</td>
       <td class="num ${fmt.cls(x.open_pct)}">${x.open_pct == null ? '—' : fmt.pct(x.open_pct)}</td>
@@ -5791,7 +5859,7 @@ function renderAI() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
+        ${codeInd(x)}
         ${buyBadgeHtml(x)}
         ${x._fast ? '<span class="ai-flag" title="用上次扫描缓存的日K换算，完整复核后自动替换">缓存换算</span>' : ''}
         ${x._new ? '<span class="ai-flag new" title="完整口径复核后新进入榜单">复核新进</span>' : ''}
@@ -5852,7 +5920,7 @@ function renderSearch() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
+        ${codeInd(x)}
         ${buyBadgeHtml(x)}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
@@ -6254,7 +6322,7 @@ function renderZT() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
+        ${codeInd(x)}
         ${buyBadgeHtml(x)}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
@@ -6431,7 +6499,7 @@ function renderDT() {
       <div class="ai-top">
         <span class="ai-rank ${i < 3 ? 'gold-rank' : ''}">${String(i + 1).padStart(2, '0')}</span>
         <span class="ai-name">${esc(x.name)}</span>
-        <span class="ai-code2"><span class="cd">${esc(x.code)}</span>${x.industry ? `<span class="ind">${esc(x.industry)}</span>` : ''}</span>
+        ${codeInd(x)}
         ${buyBadgeHtml(x)}
         <span class="ai-score"><b>${numOrDash(x.score, 0)}</b><small>分 · ${esc(x.grade)}</small></span>
       </div>
@@ -6576,7 +6644,7 @@ function renderLD() {
     const hd = L.hd || (L.lu ? '首板' : '');
     const flows = (b.followers || []).map(z => `<span class="lt-f${(z.boards || 0) >= 2 ? ' hot' : ''}"
         data-code="${esc(z.code)}" data-market="${esc(z.market)}"
-        title="点击查看 ${esc(z.name)} 的 K 线、分时与打分"><b>${esc(z.name)}</b><i
+        title="点击查看 ${esc(z.name)} 的 K 线、分时与打分"><b>${esc(z.name)}</b>${codeInd(z, 'compact')}<i
         class="${fmt.cls(z.pct)} num">${ldSign(z.pct)}${ldN(z.pct)}%</i>${
         z.hd ? `<em>${esc(z.hd)}</em>` : ''}</span>`).join('');
     return `<article class="lt-card${i < 3 ? ' top' : ''}">
@@ -6599,7 +6667,7 @@ function renderLD() {
         <div class="lt-lead" data-code="${esc(L.code)}" data-market="${esc(L.market)}"
              title="点击查看 ${esc(L.name)} 的 K 线、分时与打分">
           <span class="lt-lname">${esc(L.name)}</span>
-          <span class="lt-lcode">${esc(L.code)}</span>
+          ${codeInd(L)}
           ${hd ? `<span class="lt-ltag">${esc(hd)}</span>` : ''}
           <span class="lt-lpct num ${fmt.cls(L.pct)}">${ldSign(L.pct)}${ldN(L.pct)}%</span>
         </div>
@@ -6652,7 +6720,7 @@ function renderMonitor() {
 
   const tab = state.monitorSubTab || 'severe';
   let html = '', bind = [];
-  const nm = x => `${esc(x.name)}<span class="mcode">${esc(x.code)}</span>${x.concepts ? `<span class="mconcept">${esc(x.concepts)}</span>` : ''}`;
+  const nm = x => `<span class="mon-first">${stockCell(x)}${x.concepts ? `<span class="mconcept">${esc(x.concepts)}</span>` : ''}</span>`;
 
   if (tab === 'severe') {
     // ---- 段1：今日涨幅至涨停，能触发严重异动 ----
@@ -7063,7 +7131,8 @@ const ALL_VIEW_RUN = [
   ['AI 荐股', (sig, force) => runAI(true, sig, force)],
   ['涨停分析', (sig, force) => runZT(true, sig, force)],
   ['跌停分析', (sig, force) => runDT(true, sig, force)],
-  ['龙头分析', (sig, force) => runLD(true, sig, force)]
+  ['龙头分析', (sig, force) => runLD(true, sig, force)],
+  ['异动监控', (sig, force) => runMonitor(true, sig, force)]   // v1.7.8：首扫/开始扫描也刷新异动监控
 ];
 let scanAllRunning = false;
 async function runAll(force) {
@@ -7074,12 +7143,12 @@ async function runAll(force) {
   // force=false 仅为兼容旧调用保留；冷启动与「开始扫描」都传 true 强制拉取。
   const forceToken = force ? ('f' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)) : '';
   // v1.7.4：全板块扫描接取消控制器，并把「取消本次扫描」按钮显示出来。
-  // 五个板块都以静默模式跑（各自不碰遮罩/按钮），由这里统一接一个 signal。
+  // 六个板块都以静默模式跑（各自不碰遮罩/按钮），由这里统一接一个 signal。
   const allCtl = new AbortController();
   scanAbort = allCtl;
-  setLoading(true, '正在刷新全部板块…', '依次扫描一夜持股 / AI / 涨停 / 跌停 / 龙头', 20);
+  setLoading(true, '正在刷新全部板块…', '依次扫描一夜持股 / AI / 涨停 / 跌停 / 龙头 / 异动监控', 20);
   const cb = $('#btnCancelScan'); if (cb) cb.style.display = '';   // 这次可取消
-  const steps = [18, 40, 62, 82, 92];
+  const steps = [16, 34, 51, 68, 84, 94];
   let i = 0, canceled = false;
   const skipped = [];   // v1.7.5 修复：被别的扫描占用而没真正执行的板块，不能算「已刷新」
   try {
@@ -7088,12 +7157,12 @@ async function runAll(force) {
       let res;
       try { res = await fn(allCtl, forceToken); } catch (e) { /* 单板块失败不影响其余板块 */ }
       // 静默扫描（自动重扫/快刷）期间 state.scanning=true 但不锁本按钮；此时
-      // scan() 立即返回 'busy'。旧代码丢弃返回值仍 i++，最后谎报「五个板块已全部刷新」。
+      // scan() 立即返回 'busy'。旧代码丢弃返回值仍 i++，最后谎报「六个板块已全部刷新」。
       if (res === 'busy') { skipped.push(name); continue; }
       i += 1;
       // 只更新文案/进度，绝不再 setLoading(true)——否则 overlayN 累加到关不掉（卡在「全部完成」）
       if (allCtl.signal.aborted) { canceled = true; break; }
-      setLoadText('正在刷新全部板块…', `已完成 ${name}（${i}/5）`, steps[Math.min(i - 1, steps.length - 1)]);
+      setLoadText('正在刷新全部板块…', `已完成 ${name}（${i}/6）`, steps[Math.min(i - 1, steps.length - 1)]);
     }
     if (canceled) {
       setLoadText('已取消', '本次全板块扫描已取消，未完成的板块保留上次结果', 100);
@@ -7104,7 +7173,7 @@ async function runAll(force) {
       toast(`已刷新 ${i} 个板块；${skipped.join('、')} 正在扫描中未刷新`, 2600);
     } else {
       setLoadText('正在刷新全部板块…', '全部完成', 100);
-      toast('五个板块已全部刷新', 2200);
+      toast('六个板块已全部刷新', 2200);
     }
   } finally {
     if (scanAbort === allCtl) scanAbort = null;   // 谁建谁清，不误伤别的扫描控制器
@@ -7120,7 +7189,7 @@ async function runAll(force) {
    按钮文案固定「开始扫描」，等待浮层文案随板块进度变化。 */
 function runCurrent() { return runAll(true); }
 $('#btnScan').onclick = runCurrent;
-$('#btnScan').title = '强制从数据源拉取并刷新五个板块（一夜持股 / AI / 涨停 / 跌停 / 龙头）';
+$('#btnScan').title = '强制从数据源拉取并刷新六个板块（一夜持股 / AI / 涨停 / 跌停 / 龙头 / 异动监控）';
 
 /* 刷新键：用热缓存只刷当前板块。股票搜索/战法规则无扫描动作，直接提示。
    一夜持股走 fast=1 只读缓存换算（秒出，和宽松开关切换同一套）；其余板块重新请求即命中各自缓存。 */
@@ -7151,7 +7220,8 @@ $('#btnRefresh').onclick = refreshCurrent;
   await loadSettings();      // 先把上次保存的参数恢复，再按这份参数扫描
   // v1.7.4：冷启动一次扫齐五个板块。此前只 scan() 一夜持股，其余板块 state 为空，
   // 切到 AI/涨停/跌停/龙头时会被 tab 切换的懒加载逐个补扫——iOS 上体感「切板块又扫一次」。
-  // 改成 runAll() 后五板块数据一次备齐，切板块不再触发补扫（深链切换也会被并发互斥挡住不叠加）。
+  // 改成 runAll() 后板块数据一次备齐，切板块不再触发补扫（深链切换也会被并发互斥挡住不叠加）。
+  // v1.7.8：runAll 扩到六个板块，异动监控也随首扫/开始扫描一起刷新。
   // v1.7.5：冷启动传 force=true——与「开始扫描」一样强制从数据源拉最新；即使 iOS 自愈重载
   // （进程未重启、缓存还在）也不会拿旧缓存冒充最新数据。
   runAll(true);

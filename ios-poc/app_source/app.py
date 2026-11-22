@@ -3275,6 +3275,7 @@ def ai_pick(params):
         x["metrics"] = detail_metrics(None, sm=sm, pre=pre)
         x["trade"] = trade_plan("ai", None, x.get("price"), m=sm, pre=pre)
 
+    _fill_industry(top, limit=40)
     return {
         "ok": True, "source": source, "env": env, **snap_meta(pack),
         "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
@@ -4163,6 +4164,7 @@ def swing_pick(params):
         x["trade"] = x["plan"]
         x["metrics"] = _swing_detail(sm, wk, pre)
 
+    _fill_industry(top, limit=40)
     return {
         "ok": True, "mode": "swing", "source": source, "env": env, **snap_meta(pack),
         "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
@@ -4365,6 +4367,7 @@ def stock_search(params):
                 results.append(r)
     results.sort(key=lambda x: (-x["score"], -x["ind_count"]))
 
+    _fill_industry(results, limit=40)
     return {
         "ok": True, "source": pack.get("source"), **snap_meta(pack),
         "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
@@ -4699,6 +4702,7 @@ def limit_analysis(params):
     for x in top:
         buckets[x["action"]] = buckets.get(x["action"], 0) + 1
 
+    _fill_industry(top, limit=40)
     return {
         "ok": True, "mode": "zt", "date": day, "source": pack["source"],
         "env": market_env(),
@@ -5170,6 +5174,7 @@ def limit_down_analysis(params):
         buckets[g] = buckets.get(g, 0) + 1
         by_action[x["action"]] = by_action.get(x["action"], 0) + 1
 
+    _fill_industry(top, limit=40)
     return {
         "ok": True, "mode": "dt", "date": day, "source": pack["source"],
         "env": market_env(),
@@ -5795,6 +5800,7 @@ def scan(params, fast=False):
             "note": f"缓存换算：用上次扫描已缓存的日K/分时（命中 {len(results)}/{len(cand)} 只）按完整评分标准筛选，"
                     "未额外联网；未命中缓存的候选本次不参与。",
         }
+    _fill_industry(slim, limit=40)
     return {
         "ok": True,
         "source": source, **snap_meta(snap_pack),
@@ -6139,6 +6145,7 @@ def review_scan(fn):
         g["win_rate"] = round(g["win"] / g["count"] * 100, 1) if g["count"] else 0
         g["avg_close"] = round(g.pop("_sum") / g["count"], 2) if g["count"] else 0
     summary["by_mode"] = by_mode
+    _fill_industry(rows, limit=40)
     return {"ok": True, "file": fn, "scan_day": scan_day, "rows": rows, "summary": summary}
 
 
@@ -7496,6 +7503,9 @@ def leader_analysis(params):
         if zsrc:
             src_txt += " + 同花顺涨停池"
         cache_used = ("缓存快照" in board_src) or ("缓存快照" in mem_src)
+        # v1.7.8：龙头股 / 跟随股行业名填进展示数据，前端只负责代码下方居中显示
+        _fill_industry([b["leader"] for b in picks if b.get("leader")]
+                       + [z for b in picks for z in (b.get("followers") or [])], limit=60)
         return {"ok": True, "mode": "leader",
                 "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
                 "date": zdate or last_trade_date(),
@@ -7590,6 +7600,57 @@ def _stock_industry(code):
     with _IND_LOCK:
         _IND_MAP[code] = ind
     return ind
+
+
+def _fill_industry(rows, limit=60):
+    """只给当前要展示的股票补 industry，复用 _stock_industry 缓存。
+       已有行业的不重复查；同一只股票在多张表出现时复用已查到的行业；
+       非主板跳过；并发 8 线程，绝不逐只扫全市场。"""
+    try:
+        rows = [r for r in (rows or []) if isinstance(r, dict)]
+        def _code(r):
+            c = str(r.get("code") or "").strip()
+            return c if len(c) == 6 and (c.startswith("60") or c.startswith("00")) else ""
+        by_code, targets, seen = {}, [], set()
+        # 第一遍：已有行业（含内存缓存）先做成 code→行业 映射，后面同代码直接复用
+        for r in rows:
+            c = _code(r)
+            if not c:
+                continue
+            ind = str(r.get("industry") or "").strip()
+            if ind:
+                by_code[c] = ind
+            with _IND_LOCK:
+                cached = _IND_MAP.get(c, "")
+            if cached:
+                by_code.setdefault(c, cached)
+        # 第二遍：先平移同代码行业，剩下的才真正发网络请求
+        for r in rows:
+            c = _code(r)
+            if not c or str(r.get("industry") or "").strip():
+                continue
+            if c in by_code:
+                r["industry"] = by_code[c]
+                continue
+            if c in seen:
+                continue
+            seen.add(c)
+            targets.append(r)
+            if len(targets) >= limit:
+                break
+        if targets:
+            with ThreadPoolExecutor(max_workers=min(8, len(targets))) as ex:
+                inds = list(ex.map(lambda r: _stock_industry(r["code"]), targets))
+            for r, ind in zip(targets, inds):
+                if ind:
+                    by_code[r["code"]] = ind
+        for r in rows:
+            c = _code(r)
+            if c and not str(r.get("industry") or "").strip() and c in by_code:
+                r["industry"] = by_code[c]
+    except Exception:
+        pass
+    return rows
 
 
 def _selfcalc_deviate(limit=30):
@@ -7999,6 +8060,8 @@ def monitor_data(params=None):
     except Exception:
         pass
 
+    # v1.7.8：异动监控四张表都要显示行业；只对当前展示票补，复用 _stock_industry 缓存
+    _fill_industry(severe + plan_today + plan_tomorrow + recent + deviate + watch + watch_history, limit=60)
     return {"ok": True, "mode": "monitor", "auth": auth,
             "auth_msg": msg, "source": "fuyao" if state == "ok" else "fallback",
             "severe": severe, "deviate": deviate, "watch": watch, "watch_history": watch_history,
