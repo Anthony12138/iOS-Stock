@@ -127,7 +127,7 @@ static NSString *const kPauseJS =
         self.statusLabel.hidden = NO;
         self.statusLabel.textColor = [UIColor secondaryLabelColor];
         self.statusLabel.numberOfLines = 1;
-        self.statusLabel.text = @"股票筛选系统 iOS v1.7.7 · 正在启动…";
+        self.statusLabel.text = @"股票筛选系统 iOS v1.7.8 · 正在启动…";
         self.retryButton.hidden = YES;
     });
 }

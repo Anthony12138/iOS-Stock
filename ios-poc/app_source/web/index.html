@@ -105,7 +105,7 @@
   .tab:hover{color:var(--text);background:rgba(255,255,255,.035)}
   .tab.on{color:var(--gold);background:rgba(233,185,73,.1);border-color:rgba(233,185,73,.3);font-weight:600}
   /* v1.7.6：股票分析子板块条 + 异动监控表格 */
-  .subtabs{gap:6px;padding:3px;background:var(--bg2);border:1px solid var(--line2);border-radius:9px;margin-bottom:14px;flex-wrap:wrap}
+  .subtabs{gap:6px;padding:3px;background:var(--bg2);border:1px solid var(--line2);border-radius:9px;margin-bottom:14px;flex-wrap:wrap;justify-content:center}
   .subtab{padding:7px 18px;border-radius:7px;cursor:pointer;font-size:12.5px;color:var(--muted);
     border:1px solid transparent;background:transparent;transition:.15s}
   .subtab:hover{color:var(--text)}
@@ -128,6 +128,19 @@
   .mon-tbl .code{font-size:10px;color:var(--muted2);margin-left:5px}
   .mon-empty{padding:14px;color:var(--muted2);font-size:11.5px;text-align:center;
     border:1px dashed var(--line2);border-radius:9px}
+  /* v1.7.8：开盘啦风格异动表格（名称+概念、触发涨幅、偏离空间、状态） */
+  .mon-tbl .mnm{font-weight:600;color:#EDF2FA;font-size:11.5px}
+  .mon-tbl .mcode{font-size:9.5px;color:var(--muted2);margin-left:5px}
+  .mon-tbl .mconcept{display:block;font-size:9px;color:#9AA6BA;margin-top:2px}
+  .mon-tbl .mbig{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+  .mon-tbl .msub{display:block;font-size:9.5px;color:var(--muted2);margin-top:2px;font-variant-numeric:tabular-nums}
+  .mon-tbl .mcap{display:block;font-size:9px;color:var(--muted2);margin-top:2px}
+  .mon-tbl .mstatus{color:var(--up);font-weight:600}
+  .mon-filters{display:flex;gap:6px;margin:-2px 0 8px;flex-wrap:wrap}
+  .mon-filters button{padding:3px 11px;border-radius:6px;font-size:10.5px;color:var(--muted);
+    border:1px solid var(--line2);background:transparent;cursor:pointer}
+  .mon-filters button.on{color:var(--up);border-color:rgba(240,75,78,.5);background:rgba(240,75,78,.08)}
+  .mon-note{font-size:10px;color:var(--muted2);margin-top:6px}
 
   /* ---------- 漏斗 ---------- */
   .funnel{
@@ -496,7 +509,7 @@
     font-weight:700;display:grid;place-items:center;
   }
   .ai-foot{
-    display:flex;align-items:flex-start;gap:13px;margin-top:11px;padding-top:9px;
+    display:flex;align-items:center;gap:13px;margin-top:11px;padding-top:9px;
     border-top:1px solid rgba(255,255,255,.05);font-size:10.5px;color:var(--muted2);
   }
   /* v1.7.6：涨幅为主视觉放大到 16px 带涨跌色，股价 12px 白字居中作次要信息，两行排列 */
@@ -1642,6 +1655,7 @@
         </div>
       </div>
     </div>
+    <div class="ai-stats" style="margin-top:10px"><div class="ai-stat"><div class="k">上次刷新</div><div class="v num" id="monitorUpd" style="font-size:13px">—</div></div></div>
     <div class="subtabs" id="monitorSubTabs">
       <button class="subtab on" data-mt="severe">严重异动</button>
       <button class="subtab" data-mt="deviate">热门股偏离值</button>
@@ -1879,6 +1893,14 @@
               <span class="auto-next" id="ldAutoNext">未开启</span>
             </div>
           </div>
+          <div class="auto-item" data-k="monitor">
+            <div class="nm"><b>异动监控</b><small>严重异动 / 偏离值 / 重点监控，间隔最短 30 秒</small></div>
+            <div class="ctl">
+              <label class="sw"><input type="checkbox" id="monitorAuto" aria-label="异动监控自动重扫" /><i></i></label>
+              <select class="sel auto-sel" id="monitorAutoSec" title="异动监控重扫间隔"></select>
+              <span class="auto-next" id="monitorAutoNext">未开启</span>
+            </div>
+          </div>
           <button class="btn auto-offall" id="autoOffAll">全部关闭</button>
         </div>
       </section>
@@ -1935,6 +1957,29 @@
             <button class="btn ghost sm" id="apiKeyGet">↗ 去官网获取 Key</button>
           </div>
           <p class="pf-hint">Key 只存本机 data/settings.json，不写进代码、不上传 iOS 仓库。粘贴后点「保存」即生效；异动监控失效时会弹窗提醒并可一键跳官网重新获取。</p>
+        </div>
+      </section>
+
+      <section class="opt-sec">
+        <button type="button" class="opt-group" data-o="asharekey" aria-expanded="true" aria-controls="optAshareKey">
+          <span class="opt-name">精准异动字段 · ashareapi Key（可选）</span>
+          <span class="opt-sub">付费 · 逐点接近开盘啦</span>
+          <span class="opt-caret">▾</span>
+        </button>
+        <div class="opt-body" id="optAshareKey">
+          <div class="cal-stat" id="ashareKeyStat">未配置（当前用自算近似）</div>
+          <div class="pf-row">
+            <span class="pf-lbl">Key</span>
+            <input class="pf-input" id="ashareKeyInput" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="粘贴 ashareapi 的 API Key（可选）" aria-label="ashareapi API Key" />
+          </div>
+          <div class="cal-btns">
+            <button class="btn sm" id="ashareKeyTest">测试连接</button>
+            <button class="btn gold sm" id="ashareKeySave">保存</button>
+            <button class="btn ghost sm" id="ashareKeyClear">清除</button>
+            <button class="btn ghost sm" id="ashareKeyGet">↗ 去官网购买</button>
+          </div>
+          <p class="pf-hint">不填也能用：异动监控的“触发涨幅 / 偏离空间”走自算近似口径。填入有效 Key（ashareapi.com 体验版 ¥9.9 起）后自动切到精准源，字段更接近开盘啦。Key 只存本机。</p>
         </div>
       </section>
     </div>
@@ -2678,6 +2723,11 @@ function applySettings(s) {
   if (typeof s.api_key === 'string' && $('#apiKeyInput')) {
     $('#apiKeyInput').value = s.api_key;
     updateApiKeyStat(s.api_key);
+  }
+  // v1.7.8：回填 ashareapi Key
+  if ($('#ashareKeyInput')) {
+    $('#ashareKeyInput').value = typeof s.ashare_key === 'string' ? s.ashare_key : '';
+    updateAshareKeyStat(s.ashare_key || '');
   }
   return true;
 }
@@ -5029,46 +5079,50 @@ function pfClear() {
   toast(had ? '已清除股价筛选，显示全部' : '股价区间本来是空的，没有可清的', 2200);
 }
 
-/* ------------------ 自动重扫（五个板块各自独立） ------------------ */
+/* ------------------ 自动重扫（六个板块各自独立） ------------------ */
 /* 每个板块各有一套开关与间隔，1 秒一拍统一调度：
-   - 五板块各自独立计时，跟当前停在哪个板块无关：没打开的板块也照常刷新，
+   - 六板块各自独立计时，跟当前停在哪个板块无关：没打开的板块也照常刷新，
      数据在后台就绪，切过去直接是最新的（不再"切换后才开始计时"）；
    - App 退后台 / 页面不可见时才整体暂停，回来后超时的板块立刻补一次；
-   - 板块自带重入锁（scanning / aiLoading / swingLoading / ztdLoading / dtdLoading），
+   - 板块自带重入锁（scanning / aiLoading / swingLoading / ztdLoading / dtdLoading / monitorLoading），
      同一板块的请求不会叠在一起；
-   - 全局最多两路并发（AUTO_MAX_RUN），其余显示"排队中"，避免手机端五路一起打行情接口；
+   - 全局最多两路并发（AUTO_MAX_RUN），其余显示"排队中"，避免手机端六路一起打行情接口；
    - 勾上就先跑一次，并且随时能看到倒计时，避免"点了没反应"的错觉。 */
-const AUTO_KEY = 'yb_auto4';
-const AUTO_OLD_KEYS = ['yb_auto3', 'yb_auto2', 'yb_auto'];
-const AUTO_STEPS = [10, 15, 30, 60, 120];        // 五处共用同一套档位
-const AUTO_MIN = { scan: 10, swing: 30, ai: 30, zt: 30, dt: 30, ld: 30 };   // 深度分析一次要跑 10~40 秒，更短的档位没意义
+const AUTO_KEY = 'yb_auto5';
+const AUTO_OLD_KEYS = ['yb_auto4', 'yb_auto3', 'yb_auto2', 'yb_auto'];
+const AUTO_STEPS = [10, 15, 30, 60, 120];        // 六处共用同一套档位
+const AUTO_MIN = { scan: 10, swing: 30, ai: 30, zt: 30, dt: 30, ld: 30, monitor: 30 };   // 深度分析一次要跑 10~40 秒，更短的档位没意义
 const AUTO_DEF = {
   scan: 30,
   ai: PHONE_UI ? 120 : 60, zt: PHONE_UI ? 120 : 60, dt: PHONE_UI ? 120 : 60,
-  ld: PHONE_UI ? 120 : 60
+  ld: PHONE_UI ? 120 : 60, monitor: PHONE_UI ? 120 : 60
 };
 const AUTO = {
   scan: { on: false, sec: AUTO_DEF.scan, name: '一夜持股' },
   ai:   { on: false, sec: AUTO_DEF.ai,   name: 'AI 荐股' },
   zt:   { on: false, sec: AUTO_DEF.zt,   name: '涨停分析' },
   dt:   { on: false, sec: AUTO_DEF.dt,   name: '跌停分析' },
-  ld:   { on: false, sec: AUTO_DEF.ld,   name: '龙头分析' }
+  ld:   { on: false, sec: AUTO_DEF.ld,   name: '龙头分析' },
+  monitor: { on: false, sec: AUTO_DEF.monitor, name: '异动监控' }
 };
 const AUTO_UI = {
   scan: { cb: 'autoRefresh', se: 'autoSec',   nx: 'autoNext',   upd: 'lastUpd' },
   ai:   { cb: 'aiAuto',      se: 'aiAutoSec', nx: 'aiAutoNext', upd: 'aiUpd' },
   zt:   { cb: 'ztAuto',      se: 'ztAutoSec', nx: 'ztAutoNext', upd: 'ztUpd' },
   dt:   { cb: 'dtAuto',      se: 'dtAutoSec', nx: 'dtAutoNext', upd: 'dtUpd' },
-  ld:   { cb: 'ldAuto',      se: 'ldAutoSec', nx: 'ldAutoNext', upd: 'ldUpd' }
+  ld:   { cb: 'ldAuto',      se: 'ldAutoSec', nx: 'ldAutoNext', upd: 'ldUpd' },
+  monitor: { cb: 'monitorAuto', se: 'monitorAutoSec', nx: 'monitorAutoNext', upd: 'monitorUpd' }
 };
-const AUTO_POOL = ['scan', 'ai', 'zt', 'dt', 'ld'];
-const autoLast = { scan: 0, ai: 0, zt: 0, dt: 0, ld: 0 };
+const AUTO_POOL = ['scan', 'ai', 'zt', 'dt', 'ld', 'monitor'];
+const autoLast = { scan: 0, ai: 0, zt: 0, dt: 0, ld: 0, monitor: 0 };
 const AUTO_RUN = {
   scan: () => scan(true),
   ai: () => runAI(true),
   zt: () => runZT(true),
   dt: () => runDT(true),
-  ld: () => runLD(true)
+  ld: () => runLD(true),
+  // runMonitor 返回 'ok'/'fail'/'busy' 字符串，转成自动重扫引擎期望的布尔
+  monitor: async () => { const r = await runMonitor(true, null, true); return r === 'ok'; }
 };
 let autoRunning = 0;          // 正在进行中的自动刷新数（只算自动触发的）
 const AUTO_MAX_RUN = 2;       // 最多两路并发：五路一起打行情接口容易被限流、手机也扛不住
@@ -5077,7 +5131,8 @@ function autoBusy(k) {
   return k === 'scan' ? !!state.scanning
     : k === 'ai' ? !!state.aiLoading
         : k === 'zt' ? !!state.ztdLoading
-            : k === 'dt' ? !!state.dtdLoading : !!state.ldLoading;
+            : k === 'dt' ? !!state.dtdLoading
+                : k === 'ld' ? !!state.ldLoading : !!state.monitorLoading;
 }
 
 /* 把秒数吸附到合法档位（老配置里的 300 / 45 之类也能落到最近的一档） */
@@ -5211,8 +5266,8 @@ function paintTwo(el) {
 /* 各板块 tick 把 #aiMeta/#swMeta/#ztMeta/#dtMeta 写成「扫描中 Ns」后，
    成功/失败结束都要恢复成正常的 source/date · elapsed 文案，不能永久残留。
    手机端拆成两行：数据源（或数据日期）/ 耗时，去掉中间的「·」。 */
-const META_EL = { ai: '#aiMeta', swing: '#swMeta', zt: '#ztMeta', dt: '#dtMeta', ld: '#ldMeta' };
-const META_DATA = { ai: () => state.ai, zt: () => state.ztd, dt: () => state.dtd, ld: () => state.ldd };
+const META_EL = { ai: '#aiMeta', swing: '#swMeta', zt: '#ztMeta', dt: '#dtMeta', ld: '#ldMeta', monitor: '#monitorMeta' };
+const META_DATA = { ai: () => state.ai, zt: () => state.ztd, dt: () => state.dtd, ld: () => state.ldd, monitor: () => state.monitor };
 function setMeta(k, left, right) {
   const el = $(META_EL[k]); if (!el) return;
   el.dataset.ml1 = left;
@@ -5237,7 +5292,7 @@ function restoreMeta(k) {
 }
 
 /* 一次自动刷新失败：倒计时回滚到「30 秒后重试」，并在该板块显示失败文案 */
-const autoFailed = { scan: 0, swing: 0, ai: 0, zt: 0, dt: 0, ld: 0 };
+const autoFailed = { scan: 0, swing: 0, ai: 0, zt: 0, dt: 0, ld: 0, monitor: 0 };
 function autoFail(k) {
   const cfg = AUTO[k];
   autoFailed[k] = Date.now();
@@ -5251,7 +5306,7 @@ function autoFail(k) {
    刚休市时只让已开启的板块各补扫一轮（拿到收盘定格数据），随后整体暂停；
    开盘再自动恢复并立刻补一轮。补扫名额逐板块消费，遵守原有 AUTO_MAX_RUN
    并发上限，失败也不重试，避免休市期间反复打接口。 */
-const autoClosePending = { scan: false, swing: false, ai: false, zt: false, dt: false, ld: false };
+const autoClosePending = { scan: false, swing: false, ai: false, zt: false, dt: false, ld: false, monitor: false };
 let autoMktPrev = null;          // 上一拍的市场状态；null = 页面刚打开
 
 function autoMarketState() {
@@ -6586,46 +6641,101 @@ function renderMonitor() {
   const kw = String(state.search || '').trim().toLowerCase();
   const hit = r => !kw || [r.code, r.name].some(v => String(v || '').toLowerCase().includes(kw));
   const num = v => (v == null || !isFinite(+v)) ? '—' : String(v);
+  const pctTxt = v => (v == null || !isFinite(+v)) ? '—' : ((+v) > 0 ? '+' : '') + (+v).toFixed(2) + '%';
+  const pctCls = v => (+v) > 0 ? 'up' : ((+v) < 0 ? 'down' : '');
   const auth = d.auth || 'missing';
+  const planSrc = d.plan_source === 'ashareapi' ? 'ashareapi 精准源' : '自算近似';
   const srcTxt = d.source === 'fuyao'
-    ? '数据源：<b>同花顺扶摇（官方）</b>'
+    ? '数据源：<b>同花顺扶摇（名单）</b>'
     : `数据源：<b class="fb">自算兜底</b>${auth === 'invalid' ? ' · Key 已失效' : (auth === 'missing' ? ' · 未配置 Key' : '')}`;
-  if (meta) meta.innerHTML = srcTxt + ` · 数据日 ${esc(d.date || '—')} · 耗时 ${num(d.elapsed)}s`;
+  if (meta) meta.innerHTML = srcTxt + ` · 触发涨幅：<b>${esc(planSrc)}</b> · 数据日 ${esc(d.date || '—')} · 耗时 ${num(d.elapsed)}s`;
 
   const tab = state.monitorSubTab || 'severe';
-  let html = '';
+  let html = '', bind = [];
+  const nm = x => `${esc(x.name)}<span class="mcode">${esc(x.code)}</span>${x.concepts ? `<span class="mconcept">${esc(x.concepts)}</span>` : ''}`;
+
   if (tab === 'severe') {
-    const rows = (d.severe || []).filter(hit).map(x => [
-      `${esc(x.name)}<span class="code">${esc(x.code)}</span>`,
-      esc(x.label || '—'), esc(x.start || '—'), esc(x.end || '—')
-    ]);
-    html = `<div class="mon-blk"><h4>严重异动证券 <span class="src">${esc(String((d.severe || []).length))} 只</span></h4>`
-      + monRows(['股票名称', '异动类型', '监控开始', '监控结束'], rows,
-        (auth === 'ok' ? '当前无严重异动标的' : '主源不可用，严重异动名单需配置有效 API Key')) + `</div>`;
+    // ---- 段1：今日涨幅至涨停，能触发严重异动 ----
+    const t1 = (d.plan_today || []).filter(hit);
+    html += `<div class="mon-blk"><h4>今日涨幅至涨停，能触发严重异动的个股 <span class="src">${esc(String(t1.length))} 只 · ${esc(planSrc)}</span></h4>`
+      + monRows(['股票名称', '当日涨幅', '触发异动涨幅<br>股票价格', '触发异动<br>偏离值空间'],
+          t1.map(x => [nm(x),
+            `<span class="mbig ${pctCls(x.pct)}">${pctTxt(x.pct)}</span>`,
+            `<span class="mbig" style="color:var(--gold)">${num(x.trigger_pct)}%</span><span class="msub">${num(x.trigger_price)}</span>`,
+            `<span class="mbig">${num(x.space)}%</span><span class="mcap">${esc(x.period || '10日100%')}</span>`]),
+          '当前主板无临近触发标的（自算：近10日偏离值累计距 ±100% 尚远）') + '</div>';
+    t1.forEach(x => bind.push(x));
+    // ---- 段2：明日涨幅至涨停，能触发严重异动 ----
+    const t2 = (d.plan_tomorrow || []).filter(hit);
+    html += `<div class="mon-blk"><h4>明日涨幅至涨停，能触发严重异动的个股 <span class="src">${esc(String(t2.length))} 只 · ${esc(planSrc)}</span></h4>`
+      + monRows(['股票名称', '次日涨幅', '触发异动涨幅<br>股票价格', '次日触发异动<br>偏离值空间'],
+          t2.map(x => [nm(x),
+            `<span class="mbig ${pctCls(x.pct)}">${pctTxt(x.pct)}</span>`,
+            `<span class="mbig" style="color:var(--gold)">${num(x.trigger_pct)}%</span><span class="msub">${num(x.trigger_price)}</span>`,
+            `<span class="mbig">${num(x.space)}%</span><span class="mcap">${esc(x.period || '10日100%')}</span>`]),
+          '当前主板无临近触发标的') + '</div>';
+    t2.forEach(x => bind.push(x));
+    // ---- 段3：近期严重异动（筛选：全部 / 触发严重异动 / 被停牌）----
+    const smap = d.suspend_map || {};
+    const rlist = (d.recent || []).filter(hit);
+    const filt = state.monitorRecentFilter || 'all';
+    const shown = rlist.filter(x => {
+      const sp = !!smap[x.code];
+      if (filt === 'halt') return sp;
+      if (filt === 'trig') return !sp;
+      return true;
+    });
+    html += `<div class="mon-blk"><h4>近期严重异动 <span class="src">${esc(String(rlist.length))} 条 · 扶摇历史</span></h4>`
+      + `<div class="mon-filters" id="monRecentFilters">`
+      + `<button data-f="all" class="${filt === 'all' ? 'on' : ''}">全部</button>`
+      + `<button data-f="trig" class="${filt === 'trig' ? 'on' : ''}">触发严重异动</button>`
+      + `<button data-f="halt" class="${filt === 'halt' ? 'on' : ''}">被停牌</button></div>`
+      + monRows(['股票名称', '异动日期', '异动状态', '次日涨幅'],
+          shown.map(x => {
+            const sp = smap[x.code];
+            const status = sp
+              ? `<span class="mstatus">停牌</span><span class="mcap">${sp.predict ? '预计复牌 ' + esc(sp.predict.slice(5)) : (sp.term || '连续停牌')}</span>`
+              : `<span class="mstatus">触发严重异动</span><span class="mcap">${esc(x.period || '10日100%')}</span>`;
+            return [nm(x), esc(x.date || '—'), status, `<span class="${pctCls(x.next_pct)}">${pctTxt(x.next_pct)}</span>`];
+          }),
+          '暂无近期严重异动记录') + '</div>';
+    shown.forEach(x => bind.push(x));
+    html += '<div class="mon-note">口径：偏离值 = 个股涨跌幅 − 基准指数涨跌幅；连续10日累计达 ±100% 或 30日达 ±200% 触发严重异动。触发涨幅为规则推算值（标注自算近似），以交易所公告为准。</div>';
   } else if (tab === 'deviate') {
-    const rows = (d.deviate || []).filter(hit).map(x => [
-      `${esc(x.name)}<span class="code">${esc(x.code)}</span>`,
-      `<span class="${(+x.pct) > 0 ? 'up' : ((+x.pct) < 0 ? 'down' : '')}">${(+x.pct) > 0 ? '+' : ''}${num(x.pct)}%</span>`,
-      `<span class="${(+x.dev) > 0 ? 'up' : ((+x.dev) < 0 ? 'down' : '')}">${(+x.dev) > 0 ? '+' : ''}${num(x.dev)}%</span>`,
-      num(x.threshold) + '%',
-      x.hit ? '<span class="up">触发</span>' : '<span style="color:var(--muted2)">未触发</span>'
-    ]);
+    const rows = (d.deviate || []).filter(hit);
     html = `<div class="mon-blk"><h4>热门股偏离值 <span class="src">个股涨幅 − 上证涨幅 · 近似口径</span></h4>`
-      + monRows(['股票名称', '当日涨幅', '偏离值', '参考阈值', '状态'], rows, '暂无实时行情数据') + `</div>`;
+      + monRows(['股票名称', '当日涨幅', '偏离值', '参考阈值', '状态'],
+          rows.map(x => [nm(x),
+            `<span class="${pctCls(x.pct)}">${pctTxt(x.pct)}</span>`,
+            `<span class="${pctCls(x.dev)}">${pctTxt(x.dev)}</span>`,
+            num(x.threshold) + '%',
+            x.hit ? '<span class="up">触发</span>' : '<span style="color:var(--muted2)">未触发</span>']),
+          '暂无实时行情数据') + '</div>';
+    rows.forEach(x => bind.push(x));
   } else {
-    const rows = (d.watch || []).filter(hit).map(x => [
-      `${esc(x.name)}<span class="code">${esc(x.code)}</span>`,
-      esc(x.label || '重点监控'), esc(x.start || '—'), esc(x.end || '—')
-    ]);
-    html = `<div class="mon-blk"><h4>重点监控（监管期）证券 <span class="src">${esc(String((d.watch || []).length))} 只</span></h4>`
-      + monRows(['股票名称', '监控类型', '监控开始', '监控结束'], rows,
-        (auth === 'ok' ? '当前无重点监控标的' : '重点监控名单来自官方接口，需配置有效 API Key')) + `</div>`;
+    // v1.7.8：重点监控换源东财重点监控池——监管期证券（在监）+ 历史监管证券（已结束）
+    const rows = (d.watch || []).filter(hit);
+    const hrows = (d.watch_history || []).filter(hit);
+    const whRow = x => [nm(x), esc(x.market || (x.code.startsWith('6') ? '上交所' : '深交所')),
+      esc(x.start || '—'), esc(x.end || '—'),
+      x.end && x.end >= (d.date || '') ? '<span class="up">监管中</span>' : '<span style="color:var(--muted2)">已结束</span>'];
+    html = `<div class="mon-blk"><h4>监管期证券 <span class="src">${esc(String(rows.length))} 只 · 东财重点监控池</span></h4>`
+      + monRows(['股票名称', '市场', '监控开始', '监控结束', '状态'], rows.map(whRow), '当前无在监标的')
+      + `</div><div class="mon-blk"><h4>历史监管证券 <span class="src">${esc(String(hrows.length))} 只 · 按结束日倒序</span></h4>`
+      + monRows(['股票名称', '市场', '监控开始', '监控结束', '状态'], hrows.map(whRow), '暂无历史监管标的') + '</div>';
+    rows.forEach(x => bind.push(x));
+    hrows.forEach(x => bind.push(x));
   }
   box.innerHTML = html;
-  // 卡片/行点击打开详情
+  // 行点击打开详情（按绑定顺序）
   box.querySelectorAll('.mon-tbl tbody tr').forEach((tr, i) => {
-    const src = (tab === 'deviate' ? (d.deviate || []) : (tab === 'severe' ? (d.severe || []) : (d.watch || []))).filter(hit)[i];
+    const src = bind[i];
     if (src && src.code) { tr.style.cursor = 'pointer'; tr.onclick = () => openDetail(src.code, src.code.startsWith('6') ? 1 : 0); }
+  });
+  // 近期严重异动筛选按钮
+  const fc = $('#monRecentFilters');
+  if (fc) fc.querySelectorAll('button').forEach(b => b.onclick = () => {
+    state.monitorRecentFilter = b.dataset.f; renderMonitor();
   });
   maybeKeyAlert(d);
 }
@@ -6661,6 +6771,7 @@ async function runMonitor(silent, extSignal, force) {
     if (!r || !r.ok) throw new Error((r && r.error) || '接口无响应');
     state.monitor = r;
     renderMonitor();
+    markUpd('monitor', r);       // 自动重扫：重置倒计时，与其他板块一致
     if (!quiet) toast('异动监控：' + (r.source === 'fuyao' ? '官方数据' : '自算兜底') + ' · ' + (r.date || '—'), 2000);
     return 'ok';
   } catch (e) {
@@ -6848,6 +6959,41 @@ function updateApiKeyStat(v) {
     } catch (e) { toast('测试失败：' + (e.message || e), 2400); }
   };
   $('#apiKeyGet').onclick = () => { try { window.open('https://fuyao.aicubes.cn/admin/', '_blank', 'noopener'); } catch (e) { location.href = 'https://fuyao.aicubes.cn/admin/'; } };
+})();
+
+/* v1.7.8：设置里的 ashareapi Key 项（可选，精准异动字段） */
+function updateAshareKeyStat(v) {
+  const el = $('#ashareKeyStat'); if (!el) return;
+  el.innerHTML = v
+    ? '<span style="color:#8FD3A8">● 已配置</span> · 异动“触发涨幅/偏离空间”走 ashareapi 精准源，可点测试验证。'
+    : '<span style="color:#E9C77A">● 未配置</span> · 当前用自算近似口径（口径公开、差异约零点几个点）。';
+}
+(function () {
+  const input = $('#ashareKeyInput'); if (!input) return;
+  input.addEventListener('input', () => updateAshareKeyStat(input.value.trim()));
+  $('#ashareKeySave').onclick = async () => {
+    const v = input.value.trim();
+    try {
+      await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                   body: JSON.stringify({ ashare_key: v }) });
+      if (state.settings) state.settings.ashare_key = v;
+      updateAshareKeyStat(v);
+      toast(v ? '已保存 ashareapi Key，异动监控下次取数即切精准源' : '已清除 ashareapi Key（回到自算）', 2200);
+      if (state.view === 'monitor') { state.monitor = null; await runMonitor(true); }
+    } catch (e) { toast('保存失败：' + (e.message || e), 2400); }
+  };
+  $('#ashareKeyClear').onclick = () => { input.value = ''; updateAshareKeyStat(''); $('#ashareKeySave').click(); };
+  $('#ashareKeyTest').onclick = async () => {
+    const v = input.value.trim();
+    if (!v) return toast('请先粘贴 ashareapi Key', 1800);
+    try {
+      const r = await api('/api/ashare-test?key=' + encodeURIComponent(v) + '&t=' + Date.now());
+      const el = $('#ashareKeyStat');
+      if (r && r.ok) { if (el) el.innerHTML = '<span style="color:#8FD3A8">● 连接正常</span> · 精准异动字段可用。'; toast('测试通过：精准源可用', 2200); }
+      else { if (el) el.innerHTML = '<span style="color:#F07578">● 测试未通过</span> · ' + esc(r && r.msg || '请检查 Key'); toast('测试未通过：' + ((r && r.msg) || ''), 2600); }
+    } catch (e) { toast('测试失败：' + (e.message || e), 2400); }
+  };
+  $('#ashareKeyGet').onclick = () => { try { window.open('https://ashareapi.com/pricing', '_blank', 'noopener'); } catch (e) { location.href = 'https://ashareapi.com/pricing'; } };
 })();
 
 /* v1.7.6：Key 失效弹窗按钮 */
