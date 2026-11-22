@@ -1100,6 +1100,76 @@ def enrich_volratio(rows):
     return rows, filled
 
 
+# v1.7.6：批量行情 clist 被限流回退新浪后，新浪源没有主力净额（f62）。
+# 东财 ulist.np 批量接口（按 secid 取 f62）实测仍可用，用它按代码补回主力净额。
+# 与 enrich_volratio 同构：只改副本、清 _miss、低并发多域名，避免拖慢扫描。
+_EM_ULIST_HOSTS = ("push2.eastmoney.com", "82.push2.eastmoney.com",
+                   "push2delay.eastmoney.com", "48.push2.eastmoney.com")
+
+
+def _em_secid(r):
+    return ("1." if str(r.get("market")) == "1" else "0.") + str(r.get("code"))
+
+
+def enrich_main_net(rows):
+    """用东财 ulist.np 批量补「主力净额 f62」（新浪源缺失时）。
+    返回 (rows_copy, filled)。只补缺失且代码合法的票；f62 单位是元，与 _parse_row 一致。
+    多域名轮换 + 低并发，单次 60 只，失败批次保留原「—」不伪造 0。"""
+    rows = [dict(r) for r in rows]
+    need = [r for r in rows if "main_net" in (r.get("_miss") or []) and r.get("code")]
+    if not need:
+        return rows, 0
+    H = dict(HEADERS)
+    H["Referer"] = "https://quote.eastmoney.com/"
+    filled = 0
+    chunks = [need[i:i + 60] for i in range(0, len(need), 60)]
+    # 整体预算 8 秒：东财 IP 级限流时多域名会一起失败，不能让补数把扫描拖慢几十秒。
+    # 超时后剩余批次直接放弃，这些票维持「—」，下次扫描再试。
+    deadline = time.time() + 8
+    dead = threading.Event()
+
+    def one(batch):
+        if dead.is_set() or time.time() > deadline:
+            dead.set()
+            return 0
+        secids = ",".join(_em_secid(r) for r in batch)
+        for host in _EM_ULIST_HOSTS:
+            if time.time() > deadline:
+                dead.set()
+                return 0
+            try:
+                url = (f"https://{host}/api/qt/ulist.np/get?secids={secids}"
+                       "&fields=f12,f62&fltt=2&invt=2")
+                txt = http_text(url, headers=H, timeout=4, retries=1)
+                j = json.loads(txt)
+                diff = ((j.get("data") or {}).get("diff") or [])
+                if not diff:
+                    continue
+                by_code = {}
+                for d in diff:
+                    v = d.get("f62")
+                    if isinstance(v, (int, float)):
+                        by_code[str(d.get("f12"))] = float(v)
+                got = 0
+                for r in batch:
+                    v = by_code.get(str(r["code"]))
+                    if v is None:
+                        continue
+                    r["main_net"] = v
+                    r["_miss"] = [k for k in r.get("_miss", []) if k != "main_net"]
+                    got += 1
+                if got:
+                    return got
+            except Exception:
+                continue
+        return 0
+
+    with ThreadPoolExecutor(max_workers=_w(4)) as ex:
+        for n in ex.map(one, chunks):
+            filled += n
+    return rows, filled
+
+
 def _tx_quote(code, market):
     """腾讯实时快照：带当日日期，用来判断「这份行情是不是今天的」。
     东财日K/分时接口被限流时，日K兜底源常滞后一个交易日；这份快照能补出
@@ -3166,6 +3236,12 @@ def ai_pick(params):
     # 用副本构造候选：下面会给每只写 _rs_rank 派生字段，绝不能原地改 fetch_snapshot()
     # 的共享 rows（缓存 25 秒内被所有板块复用），否则会污染下一个板块的评分口径。
     cand = [dict(q) for q in base[: int(p["universe"])]]
+    # v1.7.6：新浪源没有主力净额，这里对候选池（仅百来只）用东财 ulist 批量补回，
+    # 让资金维度评分与列表「主力净额」列都有真实值。东财源正常时无需补，零开销。
+    if any("main_net" in (q.get("_miss") or []) for q in cand):
+        cand, _nf = enrich_main_net(cand)
+        if _nf:
+            source += "+主力净额"
     _rs = rs_rank_map(rows, ind_gain)
     for _q in cand:
         _q["_rs_rank"] = _rs.get(str(_q["code"]))
@@ -4035,6 +4111,12 @@ def swing_pick(params):
     # 用副本构造候选：下面会给每只写 _rs_rank 派生字段，绝不能原地改 fetch_snapshot()
     # 的共享 rows（缓存 25 秒内被所有板块复用），否则会污染下一个板块的评分口径。
     cand = [dict(q) for q in base[: int(p["universe"])]]
+    # v1.7.6：新浪源没有主力净额，这里对候选池（仅百来只）用东财 ulist 批量补回，
+    # 让资金维度评分与列表「主力净额」列都有真实值。东财源正常时无需补，零开销。
+    if any("main_net" in (q.get("_miss") or []) for q in cand):
+        cand, _nf = enrich_main_net(cand)
+        if _nf:
+            source += "+主力净额"
     _rs = rs_rank_map(rows, ind_gain)
     for _q in cand:
         _q["_rs_rank"] = _rs.get(str(_q["code"]))
@@ -5570,6 +5652,11 @@ def scan(params, fast=False):
 
     # 多因子预排序：不再让量比单项截断掉涨幅/换手/资金更均衡的票
     cand = sorted(s5, key=lambda x: -prescore_snapshot(x, p))[: int(p["deep_limit"])]
+    # v1.7.6：新浪源没有主力净额，对候选池用东财 ulist 批量补回（东财源正常时零开销）。
+    if any("main_net" in (q.get("_miss") or []) for q in cand):
+        cand, _nf = enrich_main_net(cand)
+        if _nf:
+            source += "+主力净额"
 
     # 深度分析
     results, errors = [], 0

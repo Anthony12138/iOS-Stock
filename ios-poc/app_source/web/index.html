@@ -65,6 +65,8 @@
     font-size:11px;font-weight:600;white-space:nowrap;line-height:1;
   }
   .buy-badge.yes{color:#E9B949;border:1px solid rgba(233,185,73,.45);background:rgba(233,185,73,.1)}
+  /* v1.7.6：A 级=观察后再决定（蓝色，介于推荐黄与不推荐红之间），只有 S 级才是推荐买入 */
+  .buy-badge.watch{color:#8FC0FF;border:1px solid rgba(127,176,255,.45);background:rgba(127,176,255,.1)}
   .buy-badge.no{color:#F07578;border:1px solid rgba(240,117,120,.45);background:rgba(240,117,120,.1)}
   .dot{width:6px;height:6px;border-radius:50%;background:var(--muted2)}
   .dot.live{background:var(--down);box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:pulse 2s infinite}
@@ -432,11 +434,19 @@
   .ai-card{
     position:relative;overflow:hidden;cursor:pointer;
     background:linear-gradient(165deg,#111827,#0C1220 62%);
-    border:1px solid var(--line);border-radius:12px;padding:13px 14px 11px;
+    border:1px solid rgba(255,255,255,.24);border-radius:12px;padding:13px 14px 11px;
     transition:transform .16s,border-color .16s,box-shadow .16s;
   }
-  .ai-card:hover{transform:translateY(-2px);border-color:rgba(233,185,73,.45);box-shadow:0 12px 28px rgba(0,0,0,.38)}
+  .ai-card:hover{transform:translateY(-2px);border-color:rgba(233,185,73,.55);box-shadow:0 12px 28px rgba(0,0,0,.38)}
+  /* A 级：原来的细金框，保持不动 */
   .ai-card.top3{border-color:rgba(233,185,73,.35);background:linear-gradient(160deg,rgba(233,185,73,.1),#0C1220 58%)}
+  /* S 级：2px 实心金 + 强光晕 + 微金底，明显强于 A 级细金框（goldCls 同时给 top3 + s-grade） */
+  .ai-card.s-grade{
+    border:2px solid rgba(233,185,73,.95);
+    background:linear-gradient(160deg,rgba(233,185,73,.17),#0C1220 58%);
+    box-shadow:0 0 0 1px rgba(233,185,73,.4),0 0 20px rgba(233,185,73,.45),inset 0 0 22px rgba(233,185,73,.07)
+  }
+  .ai-card.s-grade:hover{border-color:rgba(233,185,73,1);box-shadow:0 0 0 1px rgba(233,185,73,.5),0 0 26px rgba(233,185,73,.55),inset 0 0 22px rgba(233,185,73,.09)}
   .ai-rank{
     flex:0 0 auto;font-family:"DIN Alternate",Consolas,monospace;font-size:10.5px;font-weight:800;
     color:#8B93A6;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
@@ -458,10 +468,14 @@
     font-weight:700;display:grid;place-items:center;
   }
   .ai-foot{
-    display:flex;align-items:center;gap:9px;margin-top:11px;padding-top:9px;
+    display:flex;align-items:flex-start;gap:13px;margin-top:11px;padding-top:9px;
     border-top:1px solid rgba(255,255,255,.05);font-size:10.5px;color:var(--muted2);
   }
-  .ai-foot .p{color:#CBD5E5;font-weight:600}
+  /* v1.7.6：涨幅为主视觉放大到 16px 带涨跌色，股价 12px 白字作次要信息，两行排列 */
+  .ai-quote{display:flex;flex-direction:column;flex:0 0 auto;line-height:1.12;min-width:66px}
+  .ai-quote .pct{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:.2px}
+  .ai-quote .px{font-size:12px;font-weight:500;color:#E8EDF7;font-variant-numeric:tabular-nums;margin-top:3px}
+  .ai-foot .meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px 9px;flex:1 1 auto;min-width:0;padding-top:2px}
   .dims{display:flex;gap:3px;margin-left:auto}
   .dims i{width:15px;height:3px;border-radius:2px;display:block}
   .ai-empty{padding:60px 20px;text-align:center;color:var(--muted2);font-size:12.5px;line-height:2}
@@ -1916,10 +1930,13 @@ function numOrDash(v, digits, unit) {
   return (v == null || !isFinite(n)) ? '—' : n.toFixed(digits == null ? 2 : digits) + (unit || '');
 }
 /* v1.7.3：金色边框只给 S / A 级评分股票（此前一律给排名前 3，与评级无关）。
-   评级字段统一取 x.grade；五档 S/A/B/C/D 中只有 S、A 进推荐区。 */
+   评级字段统一取 x.grade；五档 S/A/B/C/D 中只有 S、A 进推荐区。
+   v1.7.6：S 级加 s-grade（2px 实心金 + 强光晕），A 级仍是原来的细金框 top3，拉开层次。 */
 function goldCls(x) {
   const g = String((x && x.grade) || '').toUpperCase();
-  return (g === 'S' || g === 'A') ? 'top3' : '';
+  if (g === 'S') return 'top3 s-grade';
+  if (g === 'A') return 'top3';
+  return '';
 }
 /* 量比：0 / 缺失都按「—」显示（涨停跌停列表补数失败时仍是 0，不伪造 0.00） */
 function vrText(v) {
@@ -2286,6 +2303,8 @@ document.addEventListener('keydown', e => {
 function setBanner(kind, text) {
   const b = $('#banner');
   if (!b) return;
+  // v1.7.6：战法规则页任何提示条都不显示（异常/扫描失败路径也会走到这里）。
+  if (state.view === 'strategy') { b.classList.remove('on'); b.classList.remove('info'); b.textContent = ''; return; }
   b.classList.toggle('info', kind === 'info');
   b.classList.add('on');
   b.textContent = text;                 // textContent 天然防注入
@@ -2317,15 +2336,16 @@ function syncSource(r, marketOnly) {
   renderSrcPill(lastSrcRender);
   renderMarketBanner();
 }
-/* v1.7.6：休市 / 降级 banner 独立渲染，切板块时也调用——战法规则页不显示休市提示。
+/* v1.7.6：休市 / 降级 banner 独立渲染，切板块时也调用——战法规则页不显示任何提示条。
    休市文案按当日情况细分：周末/节假日(day_off) 展示上一交易日数据；
    工作日收盘仍为当日收盘数据；午间休市保留原提示；盘前保留原提示。降级提示不变。 */
 function renderMarketBanner() {
+  // 战法规则是纯说明页：清空并跳过所有提示（休市/降级/异常），banner 不占位，正文自然顶上。
+  if (state.view === 'strategy') { clearBanner(); return; }
   const r = lastSrcRender || {};
   const m = r.market || {};
   const notes = [];
   const date = r.data_date ? '（' + r.data_date + '）' : '';
-  // 战法规则是纯说明页，没有实时数据可标注，休市提示不显示；降级提示照常。
   if (state.view !== 'strategy') {
     if (m.state === 'closed' && m.day_off === true) {
       notes.push('周末/节假日休市 · 展示上一交易日数据' + date);
@@ -2823,8 +2843,11 @@ function renderScanCards(arr) {
       <ul class="ai-reasons">${rs}</ul>
       ${planRow(x.trade)}
       <div class="ai-foot">
-        <span class="p num">${numOrDash(x.price, 2)}</span>
-        <span class="num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+        <div class="ai-quote">
+          <span class="pct num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+          <span class="px num">${numOrDash(x.price, 2)}</span>
+        </div>
+        <div class="meta">
         ${x.industry ? `<span>${esc(x.industry)}</span>` : ''}
         ${x.metrics && x.metrics.rsi14 != null ? `<span title="Wilder RSI(14)">RSI ${esc(x.metrics.rsi14)}</span>` : ''}
         ${x.metrics && x.metrics.mfi14 != null ? `<span title="资金流量指标 MFI(14)">MFI ${esc(x.metrics.mfi14)}</span>` : ''}
@@ -2833,6 +2856,7 @@ function renderScanCards(arr) {
         ${x.metrics && x.metrics.chip_sup != null ? `<span title="下方筹码峰支撑位">支撑 ${esc(x.metrics.chip_sup)}</span>` : ''}
         ${x.metrics && x.metrics.bw_rank != null ? `<span title="布林带宽近 60 日分位">带宽 ${esc(x.metrics.bw_rank)}%</span>` : ''}
         <div class="dims">${dims}</div>
+        </div>
       </div>
     </article>`;
   }).join('');
@@ -3792,9 +3816,10 @@ async function openDetail(code, market) {
   $('#dGrade').textContent = `${item.grade || ''} 级 · ${numOrDash(item.score, 0)} 分`;
   const dBadge = $('#dBuyBadge');
   if (dBadge) {
-    const ok = buyRecommended(item);
-    dBadge.textContent = ok ? '推荐买入' : '不推荐买入';
-    dBadge.className = 'buy-badge ' + (ok ? 'yes' : 'no');
+    // v1.7.6：三态标签与卡片一致——S 推荐 / A 观察后再决定 / 其余不推荐
+    const bs = badgeState(item);
+    dBadge.textContent = bs.text;
+    dBadge.className = 'buy-badge ' + bs.cls;
   }
   // v1.7.6：量比按数值着色（>0 红 / <0 绿 / 缺失或 0 中性），与列表 vrText 同一套文案口径
   setVr($('#dVr'), item.volratio);
@@ -4205,9 +4230,18 @@ function buyRecommended(item) {
   const g = String(item.grade || '');
   return g === 'S' || g === 'A';
 }
+/* v1.7.6：三态标签——只有 S 级「推荐买入」(yes)，A 级「观察后再决定」(watch)，
+   其余 B/C/D 与 avoid 仍是「不推荐买入」(no)。 verdictCls 的 buy 区仍含 S/A，
+   这里只把展示文案细化：A 级从推荐降为观察，评级/评分/verdict 判定都不变。 */
+function badgeState(item) {
+  if (!buyRecommended(item)) return { cls: 'no', text: '不推荐买入' };
+  const g = String((item && item.grade) || '').toUpperCase();
+  if (g === 'A') return { cls: 'watch', text: '观察后再决定' };
+  return { cls: 'yes', text: '推荐买入' };
+}
 function buyBadgeHtml(item) {
-  const ok = buyRecommended(item);
-  return `<span class="buy-badge ${ok ? 'yes' : 'no'}">${ok ? '推荐买入' : '不推荐买入'}</span>`;
+  const s = badgeState(item);
+  return `<span class="buy-badge ${s.cls}">${s.text}</span>`;
 }
 
 function verdictText(item) {
@@ -5594,8 +5628,11 @@ function renderAI() {
       <ul class="ai-reasons">${rs}</ul>
       ${planRow(x.trade)}
       <div class="ai-foot">
-        <span class="p num">${numOrDash(x.price, 2)}</span>
-        <span class="num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+        <div class="ai-quote">
+          <span class="pct num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+          <span class="px num">${numOrDash(x.price, 2)}</span>
+        </div>
+        <div class="meta">
         <span>量比 ${numOrDash(x.volratio, 2)}</span>
         <span>命中 ${esc(x.ind_count)} 项</span>
         ${x.metrics && x.metrics.rsi14 != null ? `<span title="Wilder RSI(14)">RSI ${esc(x.metrics.rsi14)}</span>` : ''}
@@ -5605,6 +5642,7 @@ function renderAI() {
         ${x.metrics && x.metrics.chip_sup != null ? `<span title="下方筹码峰支撑位">支撑 ${esc(x.metrics.chip_sup)}</span>` : ''}
         ${x.metrics && x.metrics.bw_rank != null ? `<span title="布林带宽近 60 日分位">带宽 ${esc(x.metrics.bw_rank)}%</span>` : ''}
         <div class="dims">${dims}</div>
+        </div>
       </div>
     </article>`;
   }).join('');
@@ -5648,14 +5686,18 @@ function renderSearch() {
       <ul class="ai-reasons">${rs}</ul>
       ${planRow(x.trade)}
       <div class="ai-foot">
-        <span class="p num">${numOrDash(x.price, 2)}</span>
-        <span class="num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+        <div class="ai-quote">
+          <span class="pct num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+          <span class="px num">${numOrDash(x.price, 2)}</span>
+        </div>
+        <div class="meta">
         <span>量比 ${numOrDash(x.volratio, 2)}</span>
         <span>命中 ${esc(x.ind_count)} 项</span>
         ${x.metrics && x.metrics.rsi14 != null ? `<span title="Wilder RSI(14)">RSI ${esc(x.metrics.rsi14)}</span>` : ''}
         ${x.metrics && x.metrics.mfi14 != null ? `<span title="资金流量 MFI(14)">MFI ${esc(x.metrics.mfi14)}</span>` : ''}
         ${x.metrics && x.metrics.adx != null ? `<span title="ADX 趋势强度">ADX ${esc(x.metrics.adx)}</span>` : ''}
         <div class="dims">${dims}</div>
+        </div>
       </div>
     </article>`;
   }).join('');
@@ -6056,10 +6098,14 @@ function renderZT() {
       <ul class="ai-reasons" style="margin-top:9px">${rs}</ul>
       ${planRow(x.trade)}
       <div class="ai-foot">
-        <span class="p num">${numOrDash(x.price, 2)}</span>
-        <span class="num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+        <div class="ai-quote">
+          <span class="pct num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+          <span class="px num">${numOrDash(x.price, 2)}</span>
+        </div>
+        <div class="meta">
         <span>首封 ${esc(x.first || '—')}</span>
         <div class="dims">${dims}</div>
+        </div>
       </div>
     </article>`;
   };
@@ -6225,10 +6271,14 @@ function renderDT() {
       <ul class="ai-reasons" style="margin-top:9px">${rs}</ul>
       ${planRow(x.trade)}
       <div class="ai-foot">
-        <span class="p num">${numOrDash(x.price, 2)}</span>
-        <span class="num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+        <div class="ai-quote">
+          <span class="pct num ${fmt.cls(x.pct)}">${fmt.pct(x.pct)}</span>
+          <span class="px num">${numOrDash(x.price, 2)}</span>
+        </div>
+        <div class="meta">
         <span>跌停价 ${numOrDash(x.plan && x.plan.dp_price, 2, ' 元')}</span>
         <div class="dims">${dims}</div>
+        </div>
       </div>
     </article>`;
   };
