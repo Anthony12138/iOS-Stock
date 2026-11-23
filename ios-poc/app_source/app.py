@@ -40,7 +40,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.8"
+VERSION = "1.7.9"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -1976,6 +1976,60 @@ def evaluate(q, bars, trend, p, idx_trend=None):
         # 之前只有 swing 板块透出，scan 详情页的技术指标区是空的。
         "metrics": detail_metrics(bars),
     }
+
+
+def eval_single_for_detail(code, market, q, bars, tr, extra, idx_trend):
+    """归入 v1.7.9：给「不在任何扫描池里、原本没评分」的票（异动监控 / 股票搜索）
+       点开详情时现场算一组通用评分，口径与一夜持股 evaluate() 完全一致。
+
+       evaluate 只依赖 q 的 pct/turnover/volratio/fcap/main_net 五个字段（见其函数体），
+       详情实时快照 _tx_quote 只有 pct/turnover，其余从这里补齐：
+         - 扫描缓存快照（cache_peek，只读不联网）里若已有该票，整条 q 字段最全，优先用；
+         - 否则用详情 q 打底，volratio/main_net 取单股补数 extra，fcap 从日K末根
+           的成交额/换手反推（amount / turnover），都没有就留 0 让该维度按「不符」计。
+       硬门槛 gate 不影响分数（rs_index 权重为 0），这里只要 score/grade/rules，
+       不把 gate.block 当失败——异动票本就不是按一夜持股门槛选出来的。
+       任何异常都吞掉返回 None，绝不让「补评分」拖垮详情主流程。
+    """
+    try:
+        if not bars or len(bars) < 25 or not q:
+            return None
+        p = dict(DEFAULTS)
+        eq = None
+        snap = cache_peek("snapshot", 600)
+        if snap:
+            eq = next((r for r in (snap.get("rows") or []) if r.get("code") == code), None)
+        if eq:
+            qe = dict(eq)                      # 共享快照行，禁止原地改
+            # 顶部实时价 / 涨幅以详情刚刚校准过的为准，避免拿 25 秒前的快照顶替
+            qe["price"] = q.get("price") or eq.get("price")
+            qe["pct"] = q.get("pct") if q.get("pct") is not None else eq.get("pct")
+            if qe.get("volratio") in (None, 0) and (extra or {}).get("volratio"):
+                qe["volratio"] = extra["volratio"]
+            if (extra or {}).get("main_net") is not None:
+                qe["main_net"] = extra["main_net"]
+        else:
+            qe = dict(q)
+            qe["volratio"] = q.get("volratio") if q.get("volratio") not in (None, 0) else ((extra or {}).get("volratio") or 0)
+            qe["main_net"] = (extra or {}).get("main_net") if (extra or {}).get("main_net") is not None else 0
+            if not qe.get("fcap"):
+                # 流通市值 ≈ 当日成交额 / 换手率（amount 单位元、turnover 为百分数）
+                amt = float(q.get("amount") or bars[-1].get("amount") or 0)
+                trn = float(q.get("turnover") or 0)
+                qe["fcap"] = (amt / (trn / 100.0)) if trn > 0 else 0
+        for k in ("pct", "turnover", "volratio", "fcap", "main_net"):
+            qe[k] = float(qe.get(k) or 0)
+        ev = evaluate(qe, bars, tr, p, idx_trend)
+        return {"score": ev.get("score"), "grade": ev.get("grade"),
+                "rules": ev.get("rules"), "tags": ev.get("tags"),
+                "dims": {k: (v.get("score") if isinstance(v, dict) else v)
+                         for k, v in (ev.get("rules") or {}).items()},
+                "reasons": [f'{v.get("name", k).split(" ", 1)[-1]}：{v.get("value", "")}'
+                            for k, v in list((ev.get("rules") or {}).items())[:3]
+                            if isinstance(v, dict)],
+                "volratio": ev.get("volratio")}
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- AI 多因子选股
@@ -5757,8 +5811,8 @@ def scan(params, fast=False):
         if miss_stock:
             detail.append(f"个股分时缺失 {miss_stock}/{len(cand)} 只")
         return {"ok": False, "mode": "scan",
-                "error": "分时数据源大面积不可用（" + "、".join(detail) +
-                         "），无法执行「分时站均价线 / 跑赢上证」硬门槛，本次不入选任何票，请稍后重试",
+                "error": "行情数据源暂时取不到完整分时（" + "、".join(detail) +
+                         "），「分时站均价线 / 跑赢上证」门槛本次未能执行；这通常是数据源限流或早盘数据未就绪，不是网络问题，可稍后重试或用最近缓存浏览",
                 "source": source, "stale": True,
                 "degraded_fields": snap_pack.get("degraded_fields", []),
                 "data_date": snap_pack.get("data_date") or "",
@@ -7831,19 +7885,62 @@ def _index_bars(market):
         return []
 
 
+def _index_live_pct(market):
+    """基准指数【实时】涨跌幅（沪=上证 s_sh000001 / 深=深证成指 s_sz399001）。
+       腾讯字段 v_s_sh000001="1~名称~代码~点位~涨跌额~涨跌幅~…"，索引 5 为涨跌幅%。
+       失败返回 None，调用方退回日K末日涨幅（离线/休市兜底）。"""
+    try:
+        sym = "s_sh000001" if int(market) == 1 else "s_sz399001"
+        txt = http_text("https://qt.gtimg.cn/q=" + sym, encoding="gbk",
+                        headers={"Referer": "https://gu.qq.com/"}, retries=1, timeout=5)
+        if '="' not in txt:
+            return None
+        f = txt.split('="', 1)[1].rstrip('";\n').split("~")
+        if len(f) > 5 and math.isfinite(float(f[5])):
+            return float(f[5])
+    except Exception:
+        pass
+    return None
+
+
+def _count_same_direction(devs):
+    """交易所规则①：滑动 3 日偏离累计 |±20%| 记一次异常波动，同向连续计数最大值。"""
+    run = 0
+    sign = 0
+    best = 0
+    for i in range(2, len(devs)):
+        w3 = sum(devs[i - 2:i + 1])
+        if abs(w3) < 20:
+            run, sign = 0, 0
+            continue
+        s = 1 if w3 > 0 else -1
+        if s == sign:
+            run += 1
+        else:
+            run, sign = 1, s
+        best = max(best, run)
+    return best
+
+
 def _selfcalc_severe_plan(limit=8):
-    """自算“今日/明日涨幅至涨停能触发严重异动”候选（近似口径，主板）。
-       规则：连续10日收盘涨跌幅偏离值累计达 ±100%（主板取 +100% 上限方向）；
-             偏离值 = 个股当日 pct − 基准指数当日 pct。
-       做法：对候选票（涨幅榜靠前 + 已在扶摇名单的主板票）拉 ~31 日 K 线与指数 K 线，
-             按日期对齐求近 10 日偏离累计，推算触发尚需涨幅与对应价位。
-       返回 (today, tomorrow)：today=当日再涨多少触线，tomorrow=次日再涨多少触线。"""
+    """自算「今日/明日涨幅至涨停能触发严重异动」候选（沪深主板，近似口径）。
+       严格按交易所《交易规则》严重异常波动四条（证监会认定一条无法自算，跳过）：
+         ① 10日内4次同向异常波动（连续3日偏离累计 |±20%|，同向计数≥4）
+         ② 10日偏离累计 +100% / −50%
+         ③ 30日偏离累计 +200% / −70%
+         ④ 证监会/交易所认定（人工，不自算）
+       偏离值 = 个股当日 pct − 基准指数当日 pct（沪=上证/深=深证成指）；
+       当日偏离用【实时指数涨幅】，取不到退日K末日。
+       「涨幅至触发」只列上行方向且单日可达者：今日 ≤ 当日剩余涨停空间、次日 ≤ 一个涨停(10%)；
+       离阈值太远（如华东重机 need≈33%）直接剔除，不再用 need<=35 粗放纳入。
+       返回 (today, tomorrow)，行字段保持 code/name/pct/trigger_pct/trigger_price/space/period，
+       另加 rule（命中的规则说明）与 live_idx（实时指数涨幅，None 表示用了日K兜底）。"""
     try:
         snap = fetch_snapshot(force=False) or {}
         rows = snap.get("rows") or []
     except Exception:
         rows = []
-    # 候选池：主板、当日涨幅靠前（连板/大涨最容易临近阈值），最多 40 只再筛
+    # 候选池：主板、当日涨幅靠前（连板/大涨最容易临近阈值），最多 18 只再拉K线
     cand = []
     for r in rows:
         code = str(r.get("code") or "")
@@ -7853,7 +7950,7 @@ def _selfcalc_severe_plan(limit=8):
             pct = float(r.get("pct") or 0)
         except Exception:
             pct = 0.0
-        if pct < 3.0:  # 只有明显的上涨/连板才可能逼近 +100% 偏离
+        if pct < 3.0:
             continue
         cand.append((pct, code, str(r.get("name") or ""), int(r.get("market") or (1 if code.startswith("6") else 0))))
     cand.sort(reverse=True)
@@ -7861,44 +7958,65 @@ def _selfcalc_severe_plan(limit=8):
 
     sh = {b.get("date"): float(b.get("pct") or 0) for b in _index_bars(1)}
     sz = {b.get("date"): float(b.get("pct") or 0) for b in _index_bars(0)}
+    live_sh, live_sz = _index_live_pct(1), _index_live_pct(0)
 
     today, tomorrow = [], []
     for pct, code, name, mk in cand:
+        mk = int(mk)
         try:
-            bars = fetch_kline(code, mk, 31) or []
+            bars = fetch_kline(code, mk, 80) or []   # 80 根：覆盖 30 日规则与早期异动
         except Exception:
             continue
         if len(bars) < 12:
             continue
-        idx = sh if int(mk) == 1 else sz
-        # 最近 10 个交易日的逐日偏离值
+        idx = sh if mk == 1 else sz
+        # 逐日偏离（按日期对齐指数日K）
         devs = []
-        for b in bars[-10:]:
+        for b in bars:
             dt = str(b.get("date") or "")
             if dt in idx:
                 devs.append(float(b.get("pct") or 0) - idx[dt])
-        if len(devs) < 10:
+        if len(devs) < 12:
             continue
         last = bars[-1]
-        price = float(last.get("close") or 0)
-        prev = float(last.get("open") or 0) or price  # 无昨收时用开盘近似基准
-        sum10 = sum(devs)
-        # 还需多少偏离触线（+100%）
-        need = 100.0 - sum10
-        if need <= 0 or need > 35:  # 已触发 或 离阈值太远（一个板都到不了）
+        price = float(last.get("close") or 0) or 0
+        # 当日偏离用实时指数；取不到用日K末日指数涨幅（devs 末项）
+        live_idx = live_sh if mk == 1 else live_sz
+        idx_last = float(idx.get(str(last.get("date") or ""), 0)) if live_idx is None else live_idx
+        dev_today = pct - idx_last
+        d_devs = devs[:-1] + [dev_today]          # 末日替换为实时偏离
+        s10, s30 = sum(d_devs[-10:]), sum(d_devs[-30:])
+        # 规则判定（严重异动是否已触发；下行方向只提示，不混入涨幅可触发栏）
+        rules = []
+        if _count_same_direction(d_devs[-10:]) >= 4:
+            rules.append("10日内4次同向异常波动")
+        if s10 >= 100 or s10 <= -50:
+            rules.append("10日偏离%+.1f%%(阈值+100/-50)" % s10)
+        if s30 >= 200 or s30 <= -70:
+            rules.append("30日偏离%+.1f%%(阈值+200/-70)" % s30)
+        if rules:
+            continue   # 已触发严重异动，不再放进「涨幅至触发」候选
+        # 上行触发：距 10 日 +100% 还差多少（用实时偏离累计）
+        need = 100.0 - s10
+        if need <= 0:
             continue
         need = round(need, 2)
-        hit_price = round(price * (1 + need / 100.0), 2)
-        row = {"code": code, "name": name, "pct": round(pct, 2),
-               "trigger_pct": need, "trigger_price": hit_price,
-               "space": need, "period": "10日100%"}
-        today.append(row)
-        # 明日：滚动掉最早一天偏离后再看剩余空间
-        need_t = round(need + devs[0], 2)
-        if 0 < need_t <= 35 and need_t < need:
-            tomorrow.append({**row, "trigger_pct": need_t,
-                             "trigger_price": round(price * (1 + need_t / 100.0), 2),
-                             "space": need_t})
+        room_today = 0.0 if pct >= 9.9 else round(10.0 - pct, 2)
+        common = {"code": code, "name": name, "pct": round(pct, 2),
+                  "trigger_price": round(price * (1 + need / 100.0), 2) if price else 0,
+                  "space": need, "period": "10日+100%",
+                  "live_idx": (None if live_idx is None else round(live_idx, 2))}
+        # 今日：还需涨幅 ≤ 当日剩余涨停空间；已涨停(空间0)不入
+        if 0 < need <= room_today and room_today > 0:
+            today.append({**common, "trigger_pct": need,
+                          "rule": "今日再涨 %.2f%% 触 10日+100%%" % need})
+        # 次日：滚动掉最早一天偏离后，剩余空间 ≤ 一个涨停(10%)
+        need_t = round(need + d_devs[-10], 2)   # 明天最早一天滚出窗口
+        if 0 < need_t <= 10.0:
+            tomorrow.append({**common, "trigger_pct": need_t,
+                             "trigger_price": round(price * (1 + need_t / 100.0), 2) if price else 0,
+                             "space": need_t,
+                             "rule": "次日再涨 %.2f%% 触 10日+100%%" % need_t})
     today.sort(key=lambda x: x["trigger_pct"])
     tomorrow.sort(key=lambda x: x["trigger_pct"])
     return today[:limit], tomorrow[:limit]
@@ -8320,11 +8438,32 @@ class Handler(BaseHTTPRequestHandler):
                         "prev_day": prev_day,
                         "extra": extra,
                         "trade": trade, "metrics": detail_metrics(bars)}
+                # 归入 v1.7.9：异动监控 / 股票搜索打开的票不在任何扫描池、原本没评分。
+                # 前端带 need_score=1 时，用刚拉好的行情现场算一组通用评分随详情返回，
+                # 让这类票也能看到等级 / 分数 / 打分明细（见 eval_single_for_detail）。
+                _idx_tr = None
+                _need_score = qs.get("need_score", [""])[0] in ("1", "true", "True")
+                if _need_score:
+                    try:
+                        _idx_tr = fetch_trends("000001", 1, ttl=8 if fast else 60)
+                    except Exception:
+                        _idx_tr = None
+                    _ev = eval_single_for_detail(code, market, q, bars, tr, extra, _idx_tr)
+                    if _ev:
+                        resp["score"] = _ev["score"]
+                        resp["grade"] = _ev["grade"]
+                        resp["rules"] = _ev["rules"]
+                        resp["dims"] = _ev["dims"]
+                        resp["reasons"] = _ev["reasons"]
+                        resp["tags"] = _ev["tags"]
+                        if _ev.get("volratio"):
+                            resp["extra"] = {**(resp.get("extra") or {}), "volratio": _ev["volratio"]}
                 # v1.6.7：所有板块的详情分时都叠加上证指数（以前只有 scan 取）。
                 # 与个股分时同一时刻口径，缓存 60 秒全站复用，多这一次请求基本无感；
                 # 失败时留空，由前端跳过叠加，不影响个股图。
                 try:
-                    _it = fetch_trends("000001", 1, ttl=8 if fast else 60)
+                    # need_score 分支已拉过上证分时，直接复用，避免同一详情页重复打接口
+                    _it = _idx_tr if _idx_tr else fetch_trends("000001", 1, ttl=8 if fast else 60)
                     if _it and len(_it.get("points") or []) >= 20:
                         # 备用源偶尔丢前收：用首个点位兜底，避免前端叠加时起点错位
                         if not _it.get("prev_close"):

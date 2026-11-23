@@ -87,6 +87,15 @@
   }
   .btn.primary:hover{filter:brightness(1.06);box-shadow:0 6px 22px rgba(233,185,73,.3)}
   .btn.primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+  /* v1.7.9：开始扫描按钮内两行说明（短按当前板块 / 长按全部板块）；长按变蓝后改为单行「松开扫描全部板块」 */
+  #btnScan{flex-direction:column;gap:1px;height:auto;min-height:38px;padding:4px 12px;line-height:1.15;touch-action:manipulation;justify-content:center}
+  #btnScan .lbl-wrap,#btnScan .lp-wrap{display:flex;flex-direction:column;align-items:center;gap:1px;width:100%}
+  #btnScan .lp-wrap{display:none;justify-content:center}
+  #btnScan .s-lbl{font-size:13px;font-weight:700}
+  #btnScan .s-hint{font-size:9px;font-weight:500;opacity:.78;white-space:nowrap}
+  #btnScan.pressing{background:linear-gradient(160deg,#6FA8FF,#3D7FE0);color:#fff;box-shadow:0 4px 18px rgba(80,150,255,.4)}
+  #btnScan.pressing .lbl-wrap{display:none}
+  #btnScan.pressing .lp-wrap{display:flex}
   .btn.ghost{background:transparent}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .btn.on{border-color:rgba(233,185,73,.55);color:var(--gold);background:rgba(233,185,73,.08)}
@@ -125,6 +134,9 @@
   .mon-tbl td{padding:8px 10px;text-align:right;border-bottom:1px solid rgba(255,255,255,.04);white-space:nowrap}
   .mon-tbl td:first-child{text-align:left}
   .mon-tbl tbody tr:last-child td{border-bottom:none}
+  /* v1.7.9：需居中的列（PC 代码/行业、两端「市场」）——表头与数据都居中，字体与其他列一致 */
+  .mon-tbl th.ct,.mon-tbl td.ct{text-align:center}
+  .mon-tbl td.ct{font-size:11.5px;color:#E8EDF7;font-weight:400;font-family:inherit}
   .mon-tbl .code{font-size:10px;color:var(--muted2);margin-left:5px}
   .mon-empty{padding:14px;color:var(--muted2);font-size:11.5px;text-align:center;
     border:1px dashed var(--line2);border-radius:9px}
@@ -494,19 +506,21 @@
   .ai-top{display:flex;align-items:center;gap:8px;position:relative;margin-bottom:10px}
   .ai-name{font-size:15.5px;font-weight:700;letter-spacing:.3px;color:#F0F4FB;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ai-code{font-size:11px;color:var(--muted2);letter-spacing:.9px}
-  /* v1.7.8：股票名称原位不动；只有「代码在上、行业简称在下」两行居中，行业严格在代码正下方 */
+  /* v1.7.9：名称原位不动；代码块按内容宽、紧贴名称（gap 2px）；代码亮 / 行业暗 */
   .code-ind{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
-    flex:0 0 70px;min-width:0;line-height:1.28;text-align:center}
-  .code-ind .cd{display:block;width:100%;margin:0;text-align:center;font-size:11px;color:var(--muted2);letter-spacing:.9px}
-  .code-ind .ind{display:block;width:100%;margin:2px 0 0;text-align:center;font-size:10px;color:#9FAFC6;
+    flex:0 0 auto;min-width:0;line-height:1.28;text-align:center}
+  .code-ind .cd{display:block;width:100%;margin:0;text-align:center;font-size:11px;color:#D7E2F2;letter-spacing:.9px}
+  .code-ind .ind{display:block;width:100%;margin:2px 0 0;text-align:center;font-size:10px;color:var(--muted2);
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .code-ind.compact{flex:0 0 48px}
+  .code-ind.compact{flex:0 0 auto}
   .code-ind.compact .cd{font-size:9px;letter-spacing:.3px}
   .code-ind.compact .ind{font-size:9px;margin-top:1px}
-  /* 表格 / 复盘 / 异动：名称仍在原位左侧，代码行业块贴在名称右边 */
-  .cell-id{display:inline-flex;align-items:center;gap:7px;line-height:1.28;text-align:left;white-space:nowrap}
-  .cell-id .nm{font-size:11.5px}
-  .cell-id .code-ind{flex:0 0 66px}
+  /* v1.7.9：表格第一列——名称固定左原位，代码块绝对定位锁在该列中线，整列对齐 */
+  .cell-id{display:flex;width:100%;align-items:center;position:relative;min-width:150px;height:30px;
+    line-height:1.28;text-align:left;white-space:nowrap}
+  .cell-id .nm{font-size:11.5px;position:absolute;left:0;top:8px;white-space:nowrap}
+  .cell-id .code-ind{position:absolute;left:50%;top:2px;transform:translateX(-50%);flex:0 0 auto}
+  /* 异动监控：位置保持原样（相对名称右），仅随代码亮/行业暗换色，不贴近名称 */
   .mon-tbl .code-ind{flex:0 0 62px}
   .mon-tbl .code-ind .cd{font-size:9.5px;letter-spacing:.4px}
   .mon-tbl .code-ind .ind{font-size:9px;margin-top:1px}
@@ -530,6 +544,8 @@
   .ai-quote .pct{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:.2px}
   .ai-quote .px{font-size:12px;font-weight:500;color:#E8EDF7;font-variant-numeric:tabular-nums;margin-top:3px}
   .ai-foot .meta{display:flex;flex-wrap:wrap;align-content:center;align-items:center;gap:5px 9px;flex:1 1 auto;min-width:0;padding-top:2px}
+  /* v1.7.9：每个指标作为不可分割整块——放不下整块就换行，不在指标内部拆行 */
+  .ai-foot .meta > span{white-space:nowrap;flex:0 0 auto}
   /* 维度条独立最右 + 竖线边界，指标文字只在自己的区域换行，不再越到指示器上方 */
   .ai-foot .dims-wrap{display:flex;align-items:center;flex:0 0 auto;padding-left:9px;border-left:1px solid rgba(255,255,255,.1)}
   .dims{display:flex;gap:3px}
@@ -629,8 +645,9 @@
   .zt-badge.rebound{background:rgba(127,176,255,.14);color:#8FC0FF;border:1px solid rgba(127,176,255,.34)}
   .zt-badge.close{background:rgba(127,176,255,.10);color:#8FC0FF;border:1px solid rgba(127,176,255,.26)}
   .zt-chip{font-size:10px;color:#8FA0BA;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06);padding:2px 6px;border-radius:5px}
+  /* v1.7.9：涨停/跌停原因区块与其他区块留出合适间距，不再紧贴 */
   .zt-reason{
-    font-size:11.5px;line-height:1.6;color:#C6D0E0;margin-top:9px;padding:6px 9px;
+    font-size:11.5px;line-height:1.6;color:#C6D0E0;margin:12px 0 11px;padding:6px 9px;
     background:rgba(75,139,245,.06);border-left:2px solid rgba(75,139,245,.5);border-radius:0 6px 6px 0;
   }
   .zt-reason b{color:#7FB0FF;font-weight:600;margin-right:5px;font-size:10.5px}
@@ -716,7 +733,7 @@
   .dim-state{margin:2px 0 10px;padding:9px 11px;border-radius:6px;font-size:10.5px;line-height:1.7}
   .dim-state.on{background:rgba(233,185,73,.09);border:1px solid rgba(233,185,73,.28);color:#E9C86A}
   .dim-state.off{background:rgba(140,152,170,.07);border:1px solid rgba(140,152,170,.2);color:#9AA6BA}
-  .dim-badges{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 9px}
+  .dim-badges{display:flex;gap:5px;flex-wrap:wrap;margin:10px 0 11px}
   .ktag{font-size:10px;font-weight:700;line-height:1.5;padding:2px 7px;border-radius:4px;
     background:rgba(233,185,73,.12);color:var(--gold);border:1px solid rgba(233,185,73,.3)}
   .dim-bdg{font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer;line-height:1.5}
@@ -927,7 +944,8 @@
     header #srcPill #srcPillText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     header .clock{order:3;flex:0 0 auto;margin-left:auto;font-size:11px}
     header .pill{display:inline-flex}
-    header #btnScan{order:5;flex:1 1 auto;justify-content:center;height:34px;font-size:13px}
+    header #btnScan{order:5;flex:1 1 auto;justify-content:center;min-height:38px;height:auto;font-size:13px}
+    header #btnScan .s-hint{font-size:8.5px}
     /* v1.7.5：刷新键排在「开始扫描」与「选项」之间，只留图标（顺时针单箭头） */
     header #btnRefresh{
       order:6;position:relative;flex:0 0 34px;width:34px;height:34px;padding:0;
@@ -1245,7 +1263,7 @@
     </svg>
     <span class="lbl">刷新</span>
   </button>
-  <button class="btn primary" id="btnScan">开始扫描</button>
+  <button class="btn primary" id="btnScan"><span class="lbl-wrap"><span class="s-lbl">开始扫描</span><small class="s-hint">短按·当前板块 | 长按·全部板块</small></span><span class="lp-wrap"><span class="s-lbl">松开扫描全部板块</span></span></button>
 </header>
 
 <div class="wrap">
@@ -1263,6 +1281,12 @@
     <button class="subtab on" data-view="zt">涨停</button>
     <button class="subtab" data-view="dt">跌停</button>
     <button class="subtab" data-view="ld">板块</button>
+  </div>
+  <!-- v1.7.9：异动监控子板块移到顶层，与主板块栏/股票分析子栏一致，上滑常驻不收起 -->
+  <div class="tabs subtabs" id="monitorSubTabs" style="display:none">
+    <button class="subtab on" data-mt="severe">严重异动</button>
+    <button class="subtab" data-mt="deviate">热门股偏离值</button>
+    <button class="subtab" data-mt="watch">重点监控</button>
   </div>
 
   <div class="banner" id="banner" aria-live="polite"></div>
@@ -1670,11 +1694,6 @@
       </div>
     </div>
     <div class="ai-stats" style="margin-top:10px"><div class="ai-stat"><div class="k">上次刷新</div><div class="v num" id="monitorUpd" style="font-size:13px">—</div></div></div>
-    <div class="subtabs" id="monitorSubTabs">
-      <button class="subtab on" data-mt="severe">严重异动</button>
-      <button class="subtab" data-mt="deviate">热门股偏离值</button>
-      <button class="subtab" data-mt="watch">重点监控</button>
-    </div>
     <div class="vsearch-bar"><span class="lb">搜索本板块</span><div id="vsh-monitor"></div></div>
     <div id="monitorMeta" class="src-note" style="margin:2px 0 12px"></div>
     <div id="monitorContent"></div>
@@ -1934,6 +1953,20 @@
       </section>
 
       <section class="opt-sec">
+        <button type="button" class="opt-group" data-o="scan" aria-expanded="true" aria-controls="optScan">
+          <span class="opt-name">开始扫描</span>
+          <span class="opt-caret">▾</span>
+        </button>
+        <div class="opt-body" id="optScan">
+          <div class="auto-item" style="border-bottom:none">
+            <div class="nm"><b>长按刷新全部板块的时长</b><small>短按只刷新当前板块，按住超过此时长则刷新全部六个板块；0.1~1.0 秒，默认 0.5 秒</small></div>
+            <div class="ctl"><input type="range" id="scanLongPressMs" min="100" max="1000" step="100" value="500" style="flex:1;accent-color:var(--gold)"><span class="auto-next" id="scanLongPressVal" style="min-width:44px;text-align:right">0.5 秒</span></div>
+          </div>
+          <p class="pf-hint">改动立即生效，配置存在本机。</p>
+        </div>
+      </section>
+
+      <section class="opt-sec">
         <button type="button" class="opt-group" data-o="cal" aria-expanded="true" aria-controls="optCal">
           <span class="opt-name">交易日历</span>
           <span class="opt-caret">▾</span>
@@ -2107,7 +2140,14 @@ const IND_ALIAS = {
 function indShort(raw) {
   let s = String(raw || '').trim().replace(/[ⅠⅡⅢⅣ]+$/g, '');
   if (!s) return '';
-  if (IND_ALIAS[s]) return IND_ALIAS[s];
+  if (IND_ALIAS[s]) return IND_ALIAS[s];   // 完整别名优先，避免拆散长全称
+  // v1.7.9：并列结构（及/和/与/、）取核心首段，避免「旅游及景区」硬截成「旅游及景」
+  const m = s.match(/^([^及和与、]+)[及和与、]/);
+  if (m && m[1]) {
+    const first = m[1];
+    if (IND_ALIAS[first]) return IND_ALIAS[first];
+    if (first.length >= 2 && first.length <= 4) return first;
+  }
   s = s.replace(/(行业|板块|概念|制造业|服务业)$/g, '');
   if (!s) return '';
   if (IND_ALIAS[s]) return IND_ALIAS[s];
@@ -2270,6 +2310,7 @@ const state = {
   // v1.7.6：股票分析子板块（analysisSubTab）+ 异动监控
   analysisSubTab: 'zt', monitor: null, monitorLoading: false, monitorSubTab: 'severe',
   monitorKeyDismissed: false,
+  scanLongPressMs: 500,   // v1.7.9：开始扫描长按阈值（100~1000ms）
   searchResult: null, searchLoading: false,
   paused: false, liveItem: null, liveMarket: null, detailSeq: 0,
   scanError: null
@@ -2307,13 +2348,37 @@ function setLoading(on, title, sub, pct) {
 /* 顶栏扫描/刷新按钮统一锁：一个板块在跑的时候别让人再点一次。
    v1.7.6：开始扫描 / 刷新 两键状态始终一致——扫描中一起禁用，
    股票搜索/战法规则（无数据源请求）也一起置灰不可点。 */
+/* v1.7.9：行情取数失败统一文案——区分「数据源限流/早盘未就绪」与「网络不通」，
+   不再一律让用户检查网络（手机网络正常时这句会误导）。 */
+function dataErrTip() {
+  return '这通常是行情数据源暂时限流或早盘数据未就绪，不是手机网络问题；稍后会自动重试，也可点「开始扫描」手动重拉。';
+}
 function noScanViewNow() { return state.view === 'review' || state.view === 'strategy'; }
+/* v1.7.9：两键变灰只看「用户主动发起」的扫描（开始扫描/长短按），不再被后台自动重扫误灰。
+   单板块静默重扫、切板块的单项加载都不走这里（它们各自锁自己的板块按钮），口径统一。
+   userScanSince 超时兜底：万一某次扫描异常没复位，180 秒后自动放行，防永久卡灰。 */
+let userScanActive = false, userScanSince = 0;
+function markUserScan(on) {
+  userScanActive = on;
+  userScanSince = on ? Date.now() : 0;
+  syncRefreshBtn();
+}
 function scanBusyNow() {
-  return scanAllRunning || state.scanning || state.aiLoading || state.ztdLoading || state.dtdLoading || state.ldLoading;
+  if (!userScanActive) { userScanSince = 0; return scanAllRunning; }
+  if (userScanSince && Date.now() - userScanSince > 180000) {
+    userScanActive = false; userScanSince = 0;   // 卡死兜底
+    return scanAllRunning;
+  }
+  return true;
 }
 function lockScanBtns(on) {
   const b = $('#btnScan');
-  if (b) b.textContent = on ? '扫描中…' : '开始扫描';
+  // v1.7.9：只改主标签，保留两行说明结构（短按/长按提示不被扫描态清掉）
+  if (b) {
+    const lbl = b.querySelector('.s-lbl');
+    if (lbl) lbl.textContent = on ? '扫描中…' : '开始扫描';
+    else b.textContent = on ? '扫描中…' : '开始扫描';
+  }
   // v1.7.6：禁用状态一律走 syncRefreshBtn 统一口径（含 scanBusyNow），
   // 避免 runAll 串行间隙被某个板块的 lockScanBtns(false) 错误启用。
   if (on) {
@@ -2702,7 +2767,7 @@ function readParams() {
    两处落盘：localStorage（立刻生效，防止首屏闪一下默认值）
    + 后端 data/settings.json（换端口、重开 exe 也还在） */
 const SET_NUMS = ['gain_min', 'gain_max', 'vr_min', 'turn_min', 'turn_max',
-                  'fcap_min', 'fcap_max', 'vol_cv_max', 'min_amount', 'score_min'];
+                  'fcap_min', 'fcap_max', 'vol_cv_max', 'min_amount', 'score_min', 'scanLongPressMs'];
 const SWITCH_MAP = { gain: ['gain_min', 'gain_max'], vr: ['vr_min'], turn: ['turn_min', 'turn_max'], fcap: ['fcap_min', 'fcap_max'] };
 
 function collectSettings() {
@@ -2797,7 +2862,17 @@ function applySettings(s) {
     $('#ashareKeyInput').value = typeof s.ashare_key === 'string' ? s.ashare_key : '';
     updateAshareKeyStat(s.ashare_key || '');
   }
+  // v1.7.9：回填长按时长（ms）并同步内存态与显示
+  if (s.scanLongPressMs != null) {
+    state.scanLongPressMs = Math.min(1000, Math.max(100, Number(s.scanLongPressMs) || 500));
+  }
+  syncLongPressUi();
   return true;
+}
+function syncLongPressUi() {
+  const el = $('#scanLongPressMs'), vv = $('#scanLongPressVal');
+  if (el) el.value = String(state.scanLongPressMs || 500);
+  if (vv) vv.textContent = ((state.scanLongPressMs || 500) / 1000).toFixed(1) + ' 秒';
 }
 
 const saveHint = () => $('#saveHint');
@@ -2838,6 +2913,14 @@ SET_NUMS.forEach(id => {
   el.addEventListener('input', h);
   el.addEventListener('change', h);
 });
+// v1.7.9：长按时长滑块实时更新内存态与显示（保存由 SET_NUMS 统一监听负责）
+(function(){
+  const el = $('#scanLongPressMs'); if (!el) return;
+  el.addEventListener('input', () => {
+    state.scanLongPressMs = Math.min(1000, Math.max(100, Number(el.value) || 500));
+    syncLongPressUi();
+  });
+})();
 ['entry_time', 'exclude_st', 'min_amount_on', 'aiUniverse', 'aiMinScore', 'aiTop',
  'swUniverse', 'swMinScore', 'swTop'].forEach(id => {
   const el = $('#' + id); if (!el) return;
@@ -2923,11 +3006,13 @@ async function scan(silent, fast, extSignal, force) {
     return true;                 // 供 autoTick 判断本轮成功
   } catch (e) {
     clearInterval(timer);
-    if ((ctl && ctl.signal.aborted) || (extSignal && extSignal.signal.aborted)) return false;   // 用户主动取消：不打失败横幅
+    const canceled = e && e.name === 'AbortError'
+      && ((ctl && ctl.signal.aborted) || (extSignal && extSignal.signal && extSignal.signal.aborted));
+    if (canceled) return false;   // 用户主动取消：不打失败横幅（与其它 run 函数口径一致）
     state.scanError = e.message || '接口异常';
     if (!state.data) renderTable();   // 空状态切到「扫描失败」
     if (!quiet || state.view === 'scan') {
-      setBanner('error', '数据获取失败：' + state.scanError + '。请检查网络后重试（行情接口需联网）。');
+      setBanner('error', '数据获取失败：' + state.scanError + '。' + dataErrTip());
     }
     if (!quiet) toast('扫描失败：' + state.scanError, 3200);
     return false;                // 供 autoTick 判断本轮失败
@@ -3003,7 +3088,7 @@ function renderTable() {
     let big, sub;
     if (!state.data && state.scanError) {
       big = '扫描失败';
-      sub = '数据获取失败：' + esc(state.scanError) + '。<br />请检查网络后点「开始扫描」重试。';
+      sub = '数据获取失败：' + esc(state.scanError) + '。<br />' + dataErrTip();
     } else if (!state.data) {
       big = '尚未扫描';
       sub = '点击顶部「开始扫描」，系统会拉取约 3500 只主板个股实时行情，<br />按视频里的 8 条规则逐层过滤，再对候选股做 K 线与分时深度打分。';
@@ -3051,7 +3136,7 @@ function renderScanCards(arr) {
   if (!arr.length) {
     const d = state.data;
     const big = !d && state.scanError ? '扫描失败' : !d ? '尚未扫描' : '当前条件下没有入选标的';
-    const sub = !d && state.scanError ? '数据获取失败，请检查网络后点「开始扫描」重试。'
+    const sub = !d && state.scanError ? ('数据获取失败。' + dataErrTip())
       : !d ? '点击「开始扫描」，按 8 条规则逐层过滤，再对候选股做 K 线与分时深度打分。'
       : '可以适当放宽条件，或调整股价筛选区间。' + (pfEmptyNote() || '');
     grid.innerHTML = `<div class="ai-empty" style="grid-column:1/-1;padding:36px 18px"><b style="color:#CBD5E5;font-size:13px">${esc(big)}</b><br />${sub}</div>`;
@@ -4015,9 +4100,11 @@ window.__appTrim = function () {
 };
 
 
-async function openDetail(code, market) {
+async function openDetail(code, market, extraItem) {
   // 股票搜索是全市场任意票，通常不在已扫描池里；必须把 searchResult 纳入候选，
   // 否则点搜索结果卡片时 find 不到 item 直接 return，看起来「点了没反应」。
+  // 归入 v1.7.9：异动监控三子板块的数据是独立池，很多票没在任何扫描池出现过，
+  // 行点击时把该行自身数据作为 extraItem 兜底，保证每一行都能点开详情。
   const sr = state.searchResult;
   const pools = state.view === 'zt' ? [state.ztd, state.swing, state.ai, state.data, sr]
     : state.view === 'dt' ? [state.dtd, state.ztd, state.swing, state.ai, state.data, sr]
@@ -4027,8 +4114,12 @@ async function openDetail(code, market) {
           // 会静默 return（看起来「点了没反应」）。
           : [state.data, state.ai, state.swing, state.ztd, state.dtd, sr];
   const item = pools.map(p => (p?.list || []).find(x => x.code === code)).find(Boolean)
+    || (extraItem && extraItem.code === code ? extraItem : null)
     || (state.curItem && state.curItem.code === code ? state.curItem : null);
   if (!item) return;
+  // 归入 v1.7.9：异动监控详情只显示评分、不显示「是否推荐买入」胶囊；
+  // 搜索票虽也无评分，但仍按常规显示胶囊（仅异动监控隐藏），故用显式来源标记。
+  state.fromMonitor = !!(extraItem && extraItem._fromMonitor);
   const seq = (state.detailSeq = (state.detailSeq || 0) + 1);
   state.selected = code;
   state.curItem = item;
@@ -4052,10 +4143,16 @@ async function openDetail(code, market) {
   $('#dGrade').textContent = `${item.grade || ''} 级 · ${numOrDash(item.score, 0)} 分`;
   const dBadge = $('#dBuyBadge');
   if (dBadge) {
-    // v1.7.6：三态标签与卡片一致——S 推荐 / A 观察后再决定 / 其余不推荐
-    const bs = badgeState(item);
-    dBadge.textContent = bs.text;
-    dBadge.className = 'buy-badge ' + bs.cls;
+    // 归入 v1.7.9：异动监控详情只显示评分，隐藏「是否推荐买入」胶囊
+    if (state.fromMonitor) {
+      dBadge.style.display = 'none';
+    } else {
+      dBadge.style.display = '';
+      // v1.7.6：三态标签与卡片一致——S 推荐 / A 观察后再决定 / 其余不推荐
+      const bs = badgeState(item);
+      dBadge.textContent = bs.text;
+      dBadge.className = 'buy-badge ' + bs.cls;
+    }
   }
   // v1.7.6：量比按数值着色（>0 红 / <0 绿 / 缺失或 0 中性），与列表 vrText 同一套文案口径
   setVr($('#dVr'), item.volratio);
@@ -4071,9 +4168,12 @@ async function openDetail(code, market) {
   }
 
   $('#dBody').innerHTML = '<div style="color:#5F6B80;font-size:12px;padding:20px 0">加载图表数据…</div>';
+  // 归入 v1.7.9：没在扫描池里、原本没评分的票（异动监控 / 搜索），请后端按现成行情
+  // 现场算一组通用评分随详情返回；已有评分的票不重算，避免同一只票两处分数对不上。
+  const needScore = (item.score == null || item.score === '') ? 1 : 0;
   let d;
   try {
-    d = await api(`/api/stock?code=${encodeURIComponent(code)}&market=${market}&mode=${encodeURIComponent(item.mode || '')}`);
+    d = await api(`/api/stock?code=${encodeURIComponent(code)}&market=${market}&mode=${encodeURIComponent(item.mode || '')}&need_score=${needScore}`);
   } catch (e) {
     d = { ok: false, error: e.message };
   }
@@ -4092,6 +4192,25 @@ async function openDetail(code, market) {
     return;
   }
   state.detail = d;
+  // 归入 v1.7.9：后端为无评分票现算了通用评分——补到 item 上（打分详情 tab / 顶部分数共用），
+  // 并刷新顶部「等级 · 分数」。买入胶囊仍按来源处理：异动监控隐藏、其它板块照常显示。
+  if (needScore && d.score != null) {
+    item.score = d.score;
+    item.grade = d.grade || '';
+    if (d.rules) item.rules = d.rules;
+    if (d.dims) item.dims = d.dims;
+    if (d.reasons) item.reasons = d.reasons;
+    if (d.tags) item.tags = d.tags;
+    item.mode = item.mode || 'scan';   // 让打分详情按一夜持股八维口径渲染
+    $('#dGrade').textContent = `${item.grade || ''} 级 · ${numOrDash(item.score, 0)} 分`;
+    const gBadge = $('#dBuyBadge');
+    if (gBadge && !state.fromMonitor) {
+      const bs = badgeState(item);
+      gBadge.textContent = bs.text;
+      gBadge.className = 'buy-badge ' + bs.cls;
+      gBadge.style.display = '';
+    }
+  }
   // 首屏就用后端统一的今日昨收 / 实时价校准顶部，和分时图刻度同一基准
   const apiPrev = Number(d.trends && d.trends.prev_close) || 0;
   if (apiPrev > 0) item.prev_close = apiPrev;
@@ -4331,7 +4450,13 @@ function renderDetailPane(item, d) {
   // 与 K 线同一时刻口径（K 线在动、止盈止损线与指标格就跟着动）；
   // 列表卡片下次重绘与详情同源，不会再出现两套数字。
   if (d && d.trade) item.trade = d.trade;
-  if (d && d.metrics && typeof d.metrics === 'object' && Object.keys(d.metrics).length) item.metrics = d.metrics;
+  // 归入 v1.7.9：由「整体覆盖」改为「合并」——详情接口的 detail_metrics（atr/rsi/mfi 等）
+  // 与卡片底指标（涨停 gain20/pos60、跌停 gain20/dist20）是两套字段，整体替换会把后者
+  // 冲成 undefined，导致点过详情的票回到列表后「20日 / 60日分位」变「—」。
+  // 合并后：同名指标取详情新值，卡片专属字段保留。
+  if (d && d.metrics && typeof d.metrics === 'object' && Object.keys(d.metrics).length) {
+    item.metrics = { ...(item.metrics || {}), ...d.metrics };
+  }
   syncQuoteStats(d, item);   // v1.7.2：上一交易日快照也填今开/最高/最低/成交额
   syncPrevDay(d);            // v1.7.2：整日休市/盘前弹标注，午休/收盘后隐藏
   const body = $('#dBody');
@@ -4607,6 +4732,19 @@ function closeDetail() {
   try { window.scrollTo(0, back); } catch (e) {}
   void document.body.offsetHeight;              // 强制重排，清掉 WebView 合成层残影
   window.dispatchEvent(new Event('resize'));    // 让 --hdrH 重新贴合 header 实际高度
+  // 归入 v1.7.9：补清卡片选中态（原来只清了表格 tr.sel，卡片 .sel 白框会残留）
+  document.querySelectorAll('.ai-card.sel,.lt-card.sel').forEach(c => c.classList.remove('sel'));
+  // 归入 v1.7.9：抽屉 transform 滑出 .28s，动画中途的重排不够——被点过的卡片
+  // GPU 合成层只光栅化了顶部一行，关掉后「头部+空白」残影。动画结束后再踢一次
+  // 卡片网格重绘（display 切换丢弃旧合成层），同一帧完成无可见闪烁。
+  const repaintGrids = () => {
+    ['scanGrid', 'aiGrid', 'ztGrid', 'dtGrid', 'ldGrid', 'searchGrid'].forEach(id => {
+      const g = document.getElementById(id); if (!g) return;
+      const disp = g.style.display;
+      g.style.display = 'none'; void g.offsetHeight; g.style.display = disp;
+    });
+  };
+  setTimeout(repaintGrids, 320);
 }
 /* Escape 统一在后面处理：只关最上层（选项层 > 抽屉） */
 
@@ -6337,7 +6475,7 @@ function renderZT() {
       </div>
       ${x.reason ? `<div class="zt-reason"><b>涨停原因</b>${esc(x.reason)}</div>` : ''}
       ${dimBadges(x)}
-      <ul class="ai-reasons" style="margin-top:9px">${rs}</ul>
+      <ul class="ai-reasons" style="margin-top:12px;margin-bottom:12px">${rs}</ul>
       ${planRow(x.trade)}
       <div class="ai-foot">
         <div class="ai-quote">
@@ -6514,7 +6652,7 @@ function renderDT() {
         ${x.days > 1 ? `<span class="zt-chip">${esc(x.days)} 连跌停</span>` : ''}
       </div>
       ${dimBadges(x)}
-      <ul class="ai-reasons" style="margin-top:9px">${rs}</ul>
+      <ul class="ai-reasons" style="margin-top:12px;margin-bottom:12px">${rs}</ul>
       ${planRow(x.trade)}
       <div class="ai-foot">
         <div class="ai-quote">
@@ -6695,10 +6833,38 @@ function renderLD() {
 }
 
 /* ------------------ 异动监控（v1.7.6 新增） ------------------ */
+/* v1.7.9：PC 端把「股票名称」拆成 名称 / 代码 / 行业 三列（代码、行业居中、字体恢复正常色）；
+   iOS 端保持原样——名称栏内名称在左、代码+行业上下合并居中。市场列在两端都居中。 */
+const MON_IOS = document.documentElement.classList.contains('ios-native');
+function monHeadCls(c, i) {
+  let s = i === 0 ? 'l' : '';
+  if (!MON_IOS && (c === '代码' || c === '行业')) s += ' ct';
+  if (c === '市场') s += ' ct';
+  return s.trim();
+}
 function monRows(cols, rows, emptyTxt) {
   if (!rows || !rows.length) return `<div class="mon-empty">${emptyTxt || '当前没有符合条件的数据'}</div>`;
-  return `<table class="mon-tbl"><thead><tr>${cols.map((c, i) => `<th class="${i === 0 ? 'l' : ''}">${c}</th>`).join('')}</tr></thead><tbody>`
-    + rows.map(r => `<tr>${r.map((c, i) => `<td class="${i === 0 ? 'l' : ''}">${c}</td>`).join('')}</tr>`).join('')
+  // PC：在「股票名称」表头后插入「代码」「行业」两列
+  let heads = cols.slice();
+  if (!MON_IOS && heads[0] === '股票名称') heads = [heads[0], '代码', '行业'].concat(heads.slice(1));
+  return `<table class="mon-tbl"><thead><tr>${heads.map((c, i) => `<th class="${monHeadCls(c, i)}">${c}</th>`).join('')}</tr></thead><tbody>`
+    + rows.map(r => {
+      let cells = r.slice();
+      if (!MON_IOS && cols[0] === '股票名称') {
+        // 从第一列 HTML 里提取代码与行业（nm() 生成的结构），拆成两个独立居中单元格
+        const first = String(cells[0] || '');
+        const cm = first.match(/class="cd">([^<]*)</);
+        const im = first.match(/class="ind">([^<]*)</);
+        const code = cm ? cm[1] : '';
+        const ind = im ? im[1] : '';
+        // PC 第一列只保留名称（去掉 code-ind 块与题材概念注释里的行业，但保留概念行）
+        const nameOnly = first.replace(/<span class="code-ind[^>]*>[\s\S]*?<\/span><\/span>/, '');
+        cells = [nameOnly,
+          `<span class="ct-val">${esc(code)}</span>`,
+          `<span class="ct-val">${esc(ind)}</span>`].concat(cells.slice(1));
+      }
+      return '<tr>' + cells.map((c, i) => `<td class="${monHeadCls(heads[i], i)}">${c}</td>`).join('') + '</tr>';
+    }).join('')
     + `</tbody></table>`;
 }
 function renderMonitor() {
@@ -6719,6 +6885,9 @@ function renderMonitor() {
   if (meta) meta.innerHTML = srcTxt + ` · 触发涨幅：<b>${esc(planSrc)}</b> · 数据日 ${esc(d.date || '—')} · 耗时 ${num(d.elapsed)}s`;
 
   const tab = state.monitorSubTab || 'severe';
+  // v1.7.9：板块标题随当前子板块变化（不再固定「异动监控·主板」）
+  const monH2 = $('#view-monitor .ai-head h2');
+  if (monH2) monH2.textContent = '异动监控 · ' + ({ severe: '严重异动', deviate: '热门股偏离值', watch: '重点监控' }[tab] || '主板');
   let html = '', bind = [];
   const nm = x => `<span class="mon-first">${stockCell(x)}${x.concepts ? `<span class="mconcept">${esc(x.concepts)}</span>` : ''}</span>`;
 
@@ -6768,7 +6937,7 @@ function renderMonitor() {
           }),
           '暂无近期严重异动记录') + '</div>';
     shown.forEach(x => bind.push(x));
-    html += '<div class="mon-note">口径：偏离值 = 个股涨跌幅 − 基准指数涨跌幅；连续10日累计达 ±100% 或 30日达 ±200% 触发严重异动。触发涨幅为规则推算值（标注自算近似），以交易所公告为准。</div>';
+    html += '<div class="mon-note">口径（沪深主板交易所规定）：偏离值 = 个股涨跌幅 − 基准指数涨跌幅（沪=上证/深=深证成指，当日取实时）。严重异动四条：①10日内4次同向异常波动 ②10日偏离累计 +100%/−50% ③30日 +200%/−70% ④交易所认定。此处推算仅列「涨幅方向且单日可达」的临近标的（今日看剩余涨停空间、次日看一个涨停），触发涨幅为规则推算近似值，以交易所公告为准。</div>';
   } else if (tab === 'deviate') {
     const rows = (d.deviate || []).filter(hit);
     html = `<div class="mon-blk"><h4>热门股偏离值 <span class="src">个股涨幅 − 上证涨幅 · 近似口径</span></h4>`
@@ -6798,7 +6967,9 @@ function renderMonitor() {
   // 行点击打开详情（按绑定顺序）
   box.querySelectorAll('.mon-tbl tbody tr').forEach((tr, i) => {
     const src = bind[i];
-    if (src && src.code) { tr.style.cursor = 'pointer'; tr.onclick = () => openDetail(src.code, src.code.startsWith('6') ? 1 : 0); }
+    // 归入 v1.7.9：把行自身数据作为兜底传入——异动票大多不在扫描池里，缺它 openDetail 会静默 return（点不开）
+    // 同时打 _fromMonitor 标记：详情只显示评分、不显示「是否推荐买入」胶囊（见 openDetail）
+    if (src && src.code) { tr.style.cursor = 'pointer'; tr.onclick = () => openDetail(src.code, src.code.startsWith('6') ? 1 : 0, { ...src, _fromMonitor: true }); }
   });
   // 近期严重异动筛选按钮
   const fc = $('#monRecentFilters');
@@ -6960,6 +7131,12 @@ function activateView(top) {
   } else {
     const sub = $('#analysisSubTabs');
     if (sub) sub.style.display = 'none';
+  }
+  // v1.7.9：异动监控子栏（顶层）仅在 monitor 视图显示，和股票分析子栏一致常驻
+  const msub = $('#monitorSubTabs');
+  if (msub) msub.style.display = (top === 'monitor') ? '' : 'none';
+  if (top === 'monitor') {
+    $$('#monitorSubTabs .subtab').forEach(s => s.classList.toggle('on', s.dataset.mt === state.monitorSubTab));
   }
   state.view = v;
   $$('#topTabs .tab').forEach(x => x.classList.toggle('on', x.dataset.view === top));
@@ -7138,6 +7315,7 @@ let scanAllRunning = false;
 async function runAll(force) {
   if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
   scanAllRunning = true;
+  markUserScan(true);       // v1.7.9：主动扫描，顶栏两键置灰（静默自动重扫不置位）
   lockScanBtns(true);
   // v1.7.5：每批强制扫描生成唯一 token，后端首次见到就清缓存令五板块重拉数据源；
   // force=false 仅为兼容旧调用保留；冷启动与「开始扫描」都传 true 强制拉取。
@@ -7180,6 +7358,7 @@ async function runAll(force) {
     // 无论成功/失败/取消都只在这里关一次遮罩，overlayN 严格配对，不会卡住
     setTimeout(() => setLoading(false), canceled ? 200 : 500);
     scanAllRunning = false;
+    markUserScan(false);
     lockScanBtns(false);
   }
 }
@@ -7187,9 +7366,52 @@ async function runAll(force) {
    「开始扫描」= 无条件强制从数据源拉取五个板块最新数据（与冷启动一致，慢但最新）；
    「刷新」= 只用现有热缓存刷当前一个板块（快，秒出），其余板块不动。
    按钮文案固定「开始扫描」，等待浮层文案随板块进度变化。 */
-function runCurrent() { return runAll(true); }
-$('#btnScan').onclick = runCurrent;
-$('#btnScan').title = '强制从数据源拉取并刷新六个板块（一夜持股 / AI / 涨停 / 跌停 / 龙头 / 异动监控）';
+/* v1.7.9：短按=强制重拉当前板块，长按=全部板块（阈值可在设置 0.1~1 秒调）。
+   与「刷新」键区别：刷新键走热缓存快刷；短按走强制重拉，语义同原来的开始扫描但缩到单板块。 */
+async function forceCurrent() {
+  if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
+  if (state.view === 'review' || state.view === 'strategy') {
+    toast('当前板块无需扫描，长按可刷新全部板块', 1800);
+    return;
+  }
+  const sig = 'fc' + Date.now();
+  const label = ({ scan: '一夜持股', ai: 'AI 荐股', zt: '股票分析·涨停', dt: '股票分析·跌停', ld: '股票分析·板块', monitor: '异动监控' })[state.view] || '当前板块';
+  toast('正在强制刷新「' + label + '」…', 1600);
+  markUserScan(true);
+  try {
+    // extSignal 传 null（短按无取消按钮），sig 仅作 force token——切勿把字符串当 AbortController
+    if (state.view === 'scan') await scan(true, false, null, sig);
+    else if (state.view === 'ai') await runAI(true, null, sig);
+    else if (state.view === 'zt') await runZT(true, null, sig);
+    else if (state.view === 'dt') await runDT(true, null, sig);
+    else if (state.view === 'ld') await runLD(true, null, sig);
+    else if (state.view === 'monitor') await runMonitor(true, null, sig);
+  } catch (e) { /* 各 run 函数内部已有失败提示 */ }
+  finally { markUserScan(false); }
+}
+(function bindScanPress() {
+  const b = $('#btnScan'); if (!b) return;
+  let t0 = 0, done = false, lpTimer = null;
+  const thr = () => {
+    const v = Number(state.scanLongPressMs);
+    return Math.min(1000, Math.max(100, isFinite(v) && v ? v : 500));
+  };
+  b.addEventListener('pointerdown', e => {
+    if (b.disabled) return;
+    t0 = performance.now(); done = false;
+    lpTimer = setTimeout(() => b.classList.add('pressing'), thr());  // 到点给蓝色反馈
+  });
+  b.addEventListener('pointerup', e => {
+    if (done || b.disabled) return;
+    done = true;
+    clearTimeout(lpTimer); b.classList.remove('pressing');
+    const hold = performance.now() - t0 >= thr();
+    hold ? runAll(true) : forceCurrent();
+  });
+  b.addEventListener('pointercancel', () => { done = true; clearTimeout(lpTimer); b.classList.remove('pressing'); });
+  b.addEventListener('pointerleave', () => { clearTimeout(lpTimer); b.classList.remove('pressing'); });
+  b.title = '短按：强制刷新当前板块；长按：强制刷新全部六个板块（时长可在设置里调）';
+})();
 
 /* 刷新键：用热缓存只刷当前板块。股票搜索/战法规则无扫描动作，直接提示。
    一夜持股走 fast=1 只读缓存换算（秒出，和宽松开关切换同一套）；其余板块重新请求即命中各自缓存。 */
