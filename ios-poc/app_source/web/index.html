@@ -1202,10 +1202,31 @@
     background:#000000;border-color:rgba(233,185,73,.6);
     box-shadow:0 0 0 1px rgba(233,185,73,.22),0 0 14px rgba(233,185,73,.28)
   }
+  /* v1.7.9：S 级单独提亮金框——上面 .top3 特异性(0,3,1)会把全局 .ai-card.s-grade 的强框覆盖成 A 级弱框，
+     这里补同特异性、写在后面的 .s-grade 胜出：更亮金 #FFD75E + 2px 实边 + 双层光晕，与 A 级明显拉开 */
+  html.ios-native .ai-card.s-grade{
+    background:#000000;border:2px solid #FFD75E;
+    box-shadow:0 0 0 1px rgba(255,215,94,.45),0 0 22px rgba(255,193,58,.5),inset 0 0 26px rgba(255,193,58,.10)
+  }
   /* 龙头分析前三仍按名次加金框，同样保留光晕 */
   html.ios-native .lt-card.top{
     background:#000000;border-color:rgba(233,185,73,.55);
     box-shadow:0 0 0 1px rgba(233,185,73,.2),0 0 12px rgba(233,185,73,.25)
+  }
+  /* v1.7.9：iOS 端禁选中/复制——长按扫描键不再弹系统选择光标。
+     全局禁选 + touch-callout，只对「股票代码 + 股票名称」开白名单（便于复制）；
+     设置面板复用的 .nm（.scan-sw .nm / .auto-item .nm）不在白名单，仍禁选 */
+  html.ios-native *{
+    -webkit-user-select:none;user-select:none;
+    -webkit-touch-callout:none
+  }
+  html.ios-native .cell-id .nm,
+  html.ios-native .ai-name,html.ios-native .lt-name,html.ios-native .lt-lname,
+  html.ios-native .code-ind .cd,
+  html.ios-native #dName,html.ios-native #dCode,
+  html.ios-native input,html.ios-native textarea{
+    -webkit-user-select:text;user-select:text;
+    -webkit-touch-callout:default
   }
   /* 回到顶部圆钮：仅 iOS 显示 */
   html.ios-native .backtop{display:flex}
@@ -7313,7 +7334,7 @@ const ALL_VIEW_RUN = [
 ];
 let scanAllRunning = false;
 async function runAll(force) {
-  if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
+  if (scanAllRunning) return toast('正在重新扫描全部板块，稍等几秒', 1800);
   scanAllRunning = true;
   markUserScan(true);       // v1.7.9：主动扫描，顶栏两键置灰（静默自动重扫不置位）
   lockScanBtns(true);
@@ -7324,7 +7345,7 @@ async function runAll(force) {
   // 六个板块都以静默模式跑（各自不碰遮罩/按钮），由这里统一接一个 signal。
   const allCtl = new AbortController();
   scanAbort = allCtl;
-  setLoading(true, '正在刷新全部板块…', '依次扫描一夜持股 / AI / 涨停 / 跌停 / 龙头 / 异动监控', 20);
+  setLoading(true, '正在重新扫描全部板块', '依次重新拉取六个板块的实时行情与日K线', 20);
   const cb = $('#btnCancelScan'); if (cb) cb.style.display = '';   // 这次可取消
   const steps = [16, 34, 51, 68, 84, 94];
   let i = 0, canceled = false;
@@ -7340,7 +7361,7 @@ async function runAll(force) {
       i += 1;
       // 只更新文案/进度，绝不再 setLoading(true)——否则 overlayN 累加到关不掉（卡在「全部完成」）
       if (allCtl.signal.aborted) { canceled = true; break; }
-      setLoadText('正在刷新全部板块…', `已完成 ${name}（${i}/6）`, steps[Math.min(i - 1, steps.length - 1)]);
+      setLoadText('正在重新扫描全部板块', `已完成 ${name}（${i}/6）`, steps[Math.min(i - 1, steps.length - 1)]);
     }
     if (canceled) {
       setLoadText('已取消', '本次全板块扫描已取消，未完成的板块保留上次结果', 100);
@@ -7350,8 +7371,8 @@ async function runAll(force) {
       setLoadText('部分完成', `${skipped.join('、')} 正在扫描中，未重复拉取`, 100);
       toast(`已刷新 ${i} 个板块；${skipped.join('、')} 正在扫描中未刷新`, 2600);
     } else {
-      setLoadText('正在刷新全部板块…', '全部完成', 100);
-      toast('六个板块已全部刷新', 2200);
+      setLoadText('正在重新扫描全部板块', '全部完成', 100);
+      toast('六个板块已重新扫描完成', 2200);
     }
   } finally {
     if (scanAbort === allCtl) scanAbort = null;   // 谁建谁清，不误伤别的扫描控制器
@@ -7369,25 +7390,38 @@ async function runAll(force) {
 /* v1.7.9：短按=强制重拉当前板块，长按=全部板块（阈值可在设置 0.1~1 秒调）。
    与「刷新」键区别：刷新键走热缓存快刷；短按走强制重拉，语义同原来的开始扫描但缩到单板块。 */
 async function forceCurrent() {
-  if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
+  if (scanAllRunning) return toast('正在重新扫描全部板块，稍等几秒', 1800);
   if (state.view === 'review' || state.view === 'strategy') {
     toast('当前板块无需扫描，长按可刷新全部板块', 1800);
     return;
   }
   const sig = 'fc' + Date.now();
   const label = ({ scan: '一夜持股', ai: 'AI 荐股', zt: '股票分析·涨停', dt: '股票分析·跌停', ld: '股票分析·板块', monitor: '异动监控' })[state.view] || '当前板块';
-  toast('正在强制刷新「' + label + '」…', 1600);
+  // v1.7.9：短按=弹等待浮层强制重拉当前板块，文案与「刷新」缓存快刷区分。
+  // 底层各 run 传 silent=true（不碰浮层），这里独占 setLoading/overlayN 配对。
+  setLoading(true, '正在重新扫描「' + label + '」', '重新拉取实时行情与日K线', 12);
+  let _pct = 12;
+  const _tick = setInterval(() => { _pct = Math.min(88, _pct + 6); $('#pbar').style.width = _pct + '%'; }, 900);
   markUserScan(true);
+  let ok = true;
   try {
     // extSignal 传 null（短按无取消按钮），sig 仅作 force token——切勿把字符串当 AbortController
-    if (state.view === 'scan') await scan(true, false, null, sig);
-    else if (state.view === 'ai') await runAI(true, null, sig);
-    else if (state.view === 'zt') await runZT(true, null, sig);
-    else if (state.view === 'dt') await runDT(true, null, sig);
-    else if (state.view === 'ld') await runLD(true, null, sig);
-    else if (state.view === 'monitor') await runMonitor(true, null, sig);
-  } catch (e) { /* 各 run 函数内部已有失败提示 */ }
-  finally { markUserScan(false); }
+    let r;
+    if (state.view === 'scan') r = await scan(true, false, null, sig);
+    else if (state.view === 'ai') r = await runAI(true, null, sig);
+    else if (state.view === 'zt') r = await runZT(true, null, sig);
+    else if (state.view === 'dt') r = await runDT(true, null, sig);
+    else if (state.view === 'ld') r = await runLD(true, null, sig);
+    else if (state.view === 'monitor') r = await runMonitor(true, null, sig);
+    if (r === false || r === 'insufficient') ok = false;
+    else if (r === 'busy') { ok = false; toast('该板块正在刷新中，请稍候', 1800); }
+  } catch (e) { ok = false; /* 各 run 函数内部已有失败提示 */ }
+  finally {
+    clearInterval(_tick);
+    setLoading(false);
+    if (ok) toast(label + ' 重新扫描完成', 2200);
+    markUserScan(false);
+  }
 }
 (function bindScanPress() {
   const b = $('#btnScan'); if (!b) return;
@@ -7416,24 +7450,32 @@ async function forceCurrent() {
 /* 刷新键：用热缓存只刷当前板块。股票搜索/战法规则无扫描动作，直接提示。
    一夜持股走 fast=1 只读缓存换算（秒出，和宽松开关切换同一套）；其余板块重新请求即命中各自缓存。 */
 async function refreshCurrent() {
-  if (scanAllRunning) return toast('正在刷新全部板块，稍等几秒', 1800);
+  if (scanAllRunning) return toast('正在重新扫描全部板块，稍等几秒', 1800);
   if (state.view === 'review' || state.view === 'strategy') {
     toast('当前板块无需刷新', 1600);
     return;
   }
   const label = ({ scan: '一夜持股', ai: 'AI 荐股', zt: '股票分析·涨停', dt: '股票分析·跌停', ld: '股票分析·板块', monitor: '异动监控' })[state.view] || '当前板块';
-  toast('正在用缓存刷新「' + label + '」…', 1500);
+  // v1.7.9：刷新键=弹等待浮层用热缓存快刷当前板块，口径与短按「重新扫描」区分。
+  // 底层传 silent=true 不碰浮层，这里独占 setLoading/overlayN 配对；快刷秒出，进度直接给 75%。
+  setLoading(true, '正在用缓存刷新「' + label + '」', '读取本机已缓存数据', 75);
+  let ok = true;
   try {
-    if (state.view === 'scan') {
-      const r = await scan(true, true);                     // fast：只读缓存，不联网
-      if (r === 'insufficient') toast('暂无缓存数据，请点「开始扫描」拉取', 2400);
-    }
-    else if (state.view === 'ai') await runAI(true);
-    else if (state.view === 'zt') await runZT(true);
-    else if (state.view === 'dt') await runDT(true);
-    else if (state.view === 'ld') await runLD(true);
-    else if (state.view === 'monitor') await runMonitor(true);
-  } catch (e) { /* 各 run 函数内部已有失败提示 */ }
+    let r;
+    if (state.view === 'scan') r = await scan(true, true);  // fast：只读缓存，不联网
+    else if (state.view === 'ai') r = await runAI(true);
+    else if (state.view === 'zt') r = await runZT(true);
+    else if (state.view === 'dt') r = await runDT(true);
+    else if (state.view === 'ld') r = await runLD(true);
+    else if (state.view === 'monitor') r = await runMonitor(true);
+    if (r === 'insufficient') { ok = false; toast('暂无缓存数据，请点「开始扫描」拉取', 2400); }
+    else if (r === 'busy') { ok = false; toast('该板块正在刷新中，请稍候', 1800); }
+    else if (r === false) ok = false;
+  } catch (e) { ok = false; /* 各 run 函数内部已有失败提示 */ }
+  finally {
+    setLoading(false);
+    if (ok) toast(label + ' 缓存刷新完成（未联网）', 2000);
+  }
 }
 $('#btnRefresh').onclick = refreshCurrent;
 (async () => {
