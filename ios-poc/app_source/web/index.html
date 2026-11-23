@@ -132,7 +132,9 @@
   .mon-blk h4 .src b{color:#8FD3A8}
   .mon-blk h4 .src b.fb{color:#E9C77A}
   .mon-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px;
-    border:1px solid var(--line2);border-radius:9px;overflow:hidden}
+    border:1px solid var(--line2);border-radius:9px;overflow:hidden;table-layout:fixed}
+  /* v1.8.0：固定列宽——同结构表格列宽一致，解决两个监控表列错位；第一列名称定宽，其余均分 */
+  .mon-tbl th:first-child,.mon-tbl td:first-child{width:190px}
   .mon-tbl th{background:#111827;color:var(--muted);font-weight:500;font-size:10.5px;text-align:right;
     padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
   .mon-tbl th:first-child{text-align:left;border-top-left-radius:9px}
@@ -539,6 +541,11 @@
   .mon-tbl .code-ind{flex:0 0 62px}
   .mon-tbl .code-ind .cd{font-size:9.5px;letter-spacing:.4px}
   .mon-tbl .code-ind .ind{font-size:9px;margin-top:1px}
+  /* v1.8.0 PC：异动监控表格名称在其列内居中——PC 第一列只有名称（代码/行业已拆成独立列），
+     故把绝对定位的 .nm 改回静态并用 flex 居中；其它列（代码/行业/市场/日期/状态）一律不动。
+     iOS 两列竖线在下方 @media(max-width:760px) 内覆盖，互不影响。 */
+  .mon-tbl .cell-id{justify-content:center}
+  .mon-tbl .cell-id .nm{position:static;left:auto;top:auto;text-align:center}
   .mon-first{display:block;text-align:left}
   .ai-score{margin-left:auto;display:flex;align-items:center;gap:5px}
   .ai-score b{font-size:16px;color:var(--gold);font-family:"DIN Alternate",Consolas,monospace}
@@ -1042,7 +1049,15 @@
        加 padding 10px 把最右列挤出屏幕被 overflow-x:hidden 吞掉。收窄到 100px + padding 5px，
        实测 430/407/410px → 370px，390px iPhone 三表全装下；PC 端有足够宽度不受影响。 */
     .mon-tbl .cell-id{min-width:100px}
+    /* v1.8.0：手机端第一列定宽 116px（名称块56+代码块46+间隙），其余均分，两监控表对齐且不破坏两列竖线 */
+    .mon-tbl th:first-child,.mon-tbl td:first-child{width:116px}
     .mon-tbl th,.mon-tbl td{padding:8px 5px}
+    /* v1.8.0 iOS：异动监控第一列——名称成一列居中、代码/行业成一列居中，两条竖线笔直对齐。
+       覆盖上面的 PC 居中规则：名称块/代码块都改回静态 flex 子项并各自定宽居中，
+       无论名称 3/4/5 字，中心都落在同一条竖线上；代码块不侵入右侧列，表格完整显示。 */
+    .mon-tbl .cell-id{justify-content:center;gap:2px}
+    .mon-tbl .cell-id .nm{position:static;left:auto;top:auto;flex:0 0 56px;width:56px;max-width:56px;text-align:center}
+    .mon-tbl .code-ind{position:static;left:auto;top:auto;transform:none;flex:0 0 46px;width:46px;align-items:center}
 
     .ai-grid{grid-template-columns:1fr!important;gap:10px}
     .lt-grid{grid-template-columns:1fr!important;gap:10px}
@@ -7004,7 +7019,7 @@ function renderMonitor() {
     // v1.8.0：偏离值按开盘啦口径重做——涨幅+连板 / 累计偏离(区间复利) / 距触发空间(复利反推)
     const rows = (d.deviate || []).filter(hit);
     html = `<div class="mon-blk"><h4>热门股偏离值 <span class="src">偏离＝个股区间涨幅−指数区间涨幅 · 空间＝复利反推 · 自算近似</span></h4>`
-      + monRows(['股票名称', '当日涨幅', '涨幅偏离值', '距触发偏离值空间'],
+      + monRows(['股票名称', '当日涨幅', '涨幅偏离值', '距触发异动<br>偏离值空间'],
           rows.map(x => [nm(x),
             // v1.8.0：几天几板做蓝色胶囊、移到涨幅下一行居中；无涨停池数据的票补「—」占位（不硬塞首板，避免误导）
             `<span class="mbig ${pctCls(x.pct)}">${pctTxt(x.pct)}</span>` + (x.high_days
@@ -7018,10 +7033,10 @@ function renderMonitor() {
     // v1.7.8：重点监控换源东财重点监控池——监管期证券（在监）+ 历史监管证券（已结束）
     const rows = (d.watch || []).filter(hit);
     const hrows = (d.watch_history || []).filter(hit);
-    // v1.8.0：日期改 YYMMDD（6 位紧凑单行，解决手机端折行）
-    const ymd6 = s => { const m = String(s || '').match(/(\d{2})\d{2}-(\d{2})-(\d{2})/); return m ? m[1] + m[2] + m[3] : (s ? esc(String(s)) : '—'); };
+    // v1.8.0：日期用完整 YYYY-MM-DD（数据源已核准；修复旧 ymd6 误取年份前两位显示 201113 的 bug）
+    const ymdDash = s => { const m = String(s || '').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? m[1] + '-' + m[2] + '-' + m[3] : (s ? esc(String(s)) : '—'); };
     const whRow = x => [nm(x), esc(x.market || (x.code.startsWith('6') ? '上交所' : '深交所')),
-      ymd6(x.start), ymd6(x.end),
+      ymdDash(x.start), ymdDash(x.end),
       x.end && x.end >= (d.date || '') ? '<span class="up">监管中</span>' : '<span style="color:var(--muted2)">已结束</span>'];
     html = `<div class="mon-blk"><h4>监管期证券 <span class="src">${esc(String(rows.length))} 只 · 东财重点监控池</span></h4>`
       + monRows(['股票名称', '市场', '监控开始', '监控结束', '状态'], rows.map(whRow), '当前无在监标的')
