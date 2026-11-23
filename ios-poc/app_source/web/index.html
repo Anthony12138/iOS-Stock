@@ -19,7 +19,9 @@
     --r:12px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%}
+  /* v1.8.0：height:100% 把 body 锁成一屏、header 的 sticky 滚过一屏就失效（PC 顶栏消失）。
+     改 min-height 后 body 由内容撑开，header/tabs 两层吸顶全程有效；手机端 body 仍是滚动容器，不受影响。 */
+  html,body{min-height:100%}
   body{
     background:
       radial-gradient(1100px 520px at 78% -8%, rgba(233,185,73,.07), transparent 60%),
@@ -106,7 +108,11 @@
 
   /* ---------- 全局布局 ---------- */
   .wrap{max-width:1560px;margin:0 auto;padding:16px 20px 40px}
-  .tabs{display:flex;gap:4px;margin-bottom:14px}
+  /* v1.8.0：主板块栏 + 子板块栏双层常驻吸顶（PC 也 sticky）。
+     主栏 top=--hdrH / z:59，子栏 top=--hdrH+--mainTabH / z:58，两层紧贴不互相盖。 */
+  .tabs{display:flex;gap:4px;margin-bottom:14px;position:sticky;top:var(--hdrH,62px);z-index:59;
+    background:rgba(10,14,22,.96);backdrop-filter:blur(10px)}
+  .tabs.subtabs{top:calc(var(--hdrH,62px) + var(--mainTabH,44px));z-index:58}
   .tab{
     padding:7px 15px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);
     border:1px solid transparent;transition:.15s;background:transparent;
@@ -145,9 +151,18 @@
   .mon-tbl .mcode{font-size:9.5px;color:var(--muted2);margin-left:5px}
   .mon-tbl .mconcept{display:block;font-size:9px;color:#9AA6BA;margin-top:2px}
   .mon-tbl .mbig{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+  /* v1.8.0：几天几板胶囊（对齐参考图2）——涨幅独占一行，胶囊在下一行居中；display:table+margin:auto 不撑破列宽 */
+  .mon-tbl .board{display:table;font-size:9px;line-height:1.4;color:#9CC4FF;
+    background:rgba(78,132,230,.22);border:1px solid rgba(110,168,255,.32);
+    border-radius:3px;padding:1px 4px;margin:3px auto 0;white-space:nowrap}
+  .mon-tbl .board.first{color:#93A6C4;background:rgba(125,145,175,.14);border-color:rgba(145,165,195,.24)}
+  .mon-tbl .board.na{color:var(--muted2);background:transparent;border-color:var(--line2)}
   .mon-tbl .msub{display:block;font-size:9.5px;color:var(--muted2);margin-top:2px;font-variant-numeric:tabular-nums}
   .mon-tbl .mcap{display:block;font-size:9px;color:var(--muted2);margin-top:2px}
   .mon-tbl .mstatus{color:var(--up);font-weight:600}
+  /* v1.8.0：异动监控全表格（表头+数据）居中——覆盖上面的 right/left，名称列内部仍靠排版本身 */
+  .mon-tbl th,.mon-tbl td{text-align:center!important}
+  .mon-tbl th:first-child,.mon-tbl td:first-child{text-align:center!important}
   .mon-filters{display:flex;gap:6px;margin:-2px 0 8px;flex-wrap:wrap}
   .mon-filters button{padding:3px 11px;border-radius:6px;font-size:10.5px;color:var(--muted);
     border:1px solid var(--line2);background:transparent;cursor:pointer}
@@ -977,6 +992,8 @@
       box-shadow:0 6px 14px rgba(0,0,0,.22);
     }
     .tabs::-webkit-scrollbar{display:none}
+    /* v1.8.0：子栏贴在主栏正下方，两层一起常驻（特异性 .tabs.subtabs > .tabs） */
+    .tabs.subtabs{top:calc(var(--hdrH,84px) + var(--mainTabH,42px));z-index:58;margin-top:-6px}
     .tab{flex:0 0 auto;padding:7px 12px;font-size:12.5px}
 
     .banner{font-size:11.5px;padding:8px 11px;margin-bottom:10px}
@@ -6848,8 +6865,24 @@ function renderLD() {
         : esc(d.empty || '当前没有符合条件的板块，等放量后再试。');
     }
   }
+  // v1.8.0：龙头/跟随股不在任何扫描池，openDetail 找不到 item 会静默 return（只有 hover 黄框）。
+  // 点击时从 d.list 找回该票自身数据作 extraItem 兜底，与异动监控同一修法。
+  const findStock = (code, market) => {
+    for (const b of (d.list || [])) {
+      const L = b.leader || {};
+      if (String(L.code) === code && String(L.market) === String(market)) return L;
+      for (const f of (b.followers || [])) {
+        if (String(f.code) === code && String(f.market) === String(market)) return f;
+      }
+    }
+    return null;
+  };
   grid.querySelectorAll('[data-code]').forEach(el => {
-    el.onclick = () => openDetail(el.dataset.code, +el.dataset.market);
+    el.onclick = () => {
+      const code = el.dataset.code, market = +el.dataset.market;
+      const src = findStock(code, market);
+      openDetail(code, market, src ? { ...src, _fromLd: true } : null);
+    };
   });
 }
 
@@ -6960,22 +6993,27 @@ function renderMonitor() {
     shown.forEach(x => bind.push(x));
     html += '<div class="mon-note">口径（沪深主板交易所规定）：偏离值 = 个股涨跌幅 − 基准指数涨跌幅（沪=上证/深=深证成指，当日取实时）。严重异动四条：①10日内4次同向异常波动 ②10日偏离累计 +100%/−50% ③30日 +200%/−70% ④交易所认定。此处推算仅列「涨幅方向且单日可达」的临近标的（今日看剩余涨停空间、次日看一个涨停），触发涨幅为规则推算近似值，以交易所公告为准。</div>';
   } else if (tab === 'deviate') {
+    // v1.8.0：偏离值按开盘啦口径重做——涨幅+连板 / 累计偏离(区间复利) / 距触发空间(复利反推)
     const rows = (d.deviate || []).filter(hit);
-    html = `<div class="mon-blk"><h4>热门股偏离值 <span class="src">个股涨幅 − 上证涨幅 · 近似口径</span></h4>`
-      + monRows(['股票名称', '当日涨幅', '偏离值', '参考阈值', '状态'],
+    html = `<div class="mon-blk"><h4>热门股偏离值 <span class="src">偏离＝个股区间涨幅−指数区间涨幅 · 空间＝复利反推 · 自算近似</span></h4>`
+      + monRows(['股票名称', '当日涨幅', '涨幅偏离值', '距触发偏离值空间'],
           rows.map(x => [nm(x),
-            `<span class="${pctCls(x.pct)}">${pctTxt(x.pct)}</span>`,
-            `<span class="${pctCls(x.dev)}">${pctTxt(x.dev)}</span>`,
-            num(x.threshold) + '%',
-            x.hit ? '<span class="up">触发</span>' : '<span style="color:var(--muted2)">未触发</span>']),
+            // v1.8.0：几天几板做蓝色胶囊、移到涨幅下一行居中；无涨停池数据的票补「—」占位（不硬塞首板，避免误导）
+            `<span class="mbig ${pctCls(x.pct)}">${pctTxt(x.pct)}</span>` + (x.high_days
+              ? `<span class="board${x.high_days === '首板' ? ' first' : ''}">${esc(x.high_days)}</span>`
+              : `<span class="board na">—</span>`),
+            `<span class="mbig ${pctCls(x.dev)}">${num(x.dev)}%</span><span class="msub">${num(x.days)}日</span>`,
+            `<span class="mbig">${num(x.space)}%</span><span class="mcap">${esc(x.rule || '')}</span>`]),
           '暂无实时行情数据') + '</div>';
     rows.forEach(x => bind.push(x));
   } else {
     // v1.7.8：重点监控换源东财重点监控池——监管期证券（在监）+ 历史监管证券（已结束）
     const rows = (d.watch || []).filter(hit);
     const hrows = (d.watch_history || []).filter(hit);
+    // v1.8.0：日期改 YYMMDD（6 位紧凑单行，解决手机端折行）
+    const ymd6 = s => { const m = String(s || '').match(/(\d{2})\d{2}-(\d{2})-(\d{2})/); return m ? m[1] + m[2] + m[3] : (s ? esc(String(s)) : '—'); };
     const whRow = x => [nm(x), esc(x.market || (x.code.startsWith('6') ? '上交所' : '深交所')),
-      esc(x.start || '—'), esc(x.end || '—'),
+      ymd6(x.start), ymd6(x.end),
       x.end && x.end >= (d.date || '') ? '<span class="up">监管中</span>' : '<span style="color:var(--muted2)">已结束</span>'];
     html = `<div class="mon-blk"><h4>监管期证券 <span class="src">${esc(String(rows.length))} 只 · 东财重点监控池</span></h4>`
       + monRows(['股票名称', '市场', '监控开始', '监控结束', '状态'], rows.map(whRow), '当前无在监标的')
@@ -7495,11 +7533,20 @@ $('#btnRefresh').onclick = refreshCurrent;
    胶囊文案长短、字体加载、横竖屏切换都会改这个高度，用 ResizeObserver 实时喂给 --hdrH。 */
 (function () {
   const hdr = document.querySelector('header');
+  const topTabs = document.getElementById('topTabs');
   if (!hdr) return;
-  const sync = () => document.documentElement.style.setProperty(
-    '--hdrH', Math.round(hdr.getBoundingClientRect().height) + 'px');
+  const sync = () => {
+    document.documentElement.style.setProperty(
+      '--hdrH', Math.round(hdr.getBoundingClientRect().height) + 'px');
+    // v1.8.0：主板块栏实际高度喂给 --mainTabH，子栏 top 据此贴在其正下方
+    if (topTabs) document.documentElement.style.setProperty(
+      '--mainTabH', Math.round(topTabs.getBoundingClientRect().height) + 'px');
+  };
   sync();
-  if (window.ResizeObserver) new ResizeObserver(sync).observe(hdr);
+  if (window.ResizeObserver) {
+    new ResizeObserver(sync).observe(hdr);
+    if (topTabs) new ResizeObserver(sync).observe(topTabs);
+  }
   window.addEventListener('resize', sync);
   window.addEventListener('orientationchange', () => setTimeout(sync, 120));
 })();

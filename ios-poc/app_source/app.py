@@ -40,7 +40,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.7.9"
+VERSION = "1.8.0"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -7707,37 +7707,116 @@ def _fill_industry(rows, limit=60):
     return rows
 
 
-def _selfcalc_deviate(limit=30):
-    """自算兜底：个股当日涨幅 - 上证当日涨幅 = 偏离值（近似口径）。
-       返回按绝对偏离值排序的列表。"""
+def _deviate_openlike_one(code, name, pct, mk, bars, ibars, high_days="", reason=""):
+    """v1.8.0：单只票按【开盘啦口径】算涨幅偏离值 + 距触发空间。
+       偏离值 = 个股N日【区间复利涨幅】 − 基准指数N日区间复利涨幅（不是逐日涨幅相加，大盘下跌时能正确扣减）。
+       空间   = 复利反推「从现价再涨多少百分比、复利后偏离达到阈值」：
+                空间 = (1 + 阈值 + 指数区间涨幅) ÷ (1 + 个股区间涨幅) − 1
+                阈值：10日窗口 +100%、30日窗口 +200%。
+       窗口实时判断：在 2~30 日里找「距最近阈值空间最小且为正」的那档，自动显示对应天数/规则。
+       指数末值用【实时涨跌幅】折算点位（开市更准），取不到退日K末值。
+       返回 dict；数据不足/已触发返回 None。"""
     try:
-        idx_bars = fetch_kline("000001", 1, 3) or []
-        idx_pct = float(idx_bars[-1].get("pct") or 0) if idx_bars else 0.0
+        cl = [float(b.get("close") or 0) for b in bars]
+        icl = [float(b.get("close") or 0) for b in ibars]
+        if len(cl) < 3 or len(icl) < 3:
+            return None
+        # 指数末值用实时涨跌幅折算（开市口径更贴近开盘啦）；失败退日K
+        live = _index_live_pct(mk)
+        if live is not None and len(icl) >= 2 and icl[-2] > 0:
+            icl[-1] = icl[-2] * (1.0 + live / 100.0)
+        best = None
+        for n in range(2, min(31, len(cl), len(icl))):
+            base, ibase = cl[-1 - n], icl[-1 - n]
+            if base <= 0 or ibase <= 0:
+                continue
+            gs = cl[-1] / base - 1.0          # 个股 N 日复利涨幅
+            gi = icl[-1] / ibase - 1.0        # 指数 N 日复利涨幅
+            dev = (gs - gi) * 100.0
+            if dev <= 0:                       # 只看上行方向（热门股偏离值为正）
+                continue
+            # 窗口→阈值：≤10日走 +100%，>10日走 +200%（交易所规则）
+            thr = 1.0 if n <= 10 else 2.0
+            space = ((1.0 + thr + gi) / (1.0 + gs) - 1.0) * 100.0
+            if space <= 0:                     # 已触发，不列入「距触发空间」榜
+                continue
+            # 挑「空间最小（最接近触发）」的那档窗口
+            if best is None or space < best["_space"]:
+                best = {"n": n, "dev": dev, "space": space, "thr": thr,
+                        "_space": space, "gs": gs, "gi": gi}
+        if not best:
+            return None
+        n = best["n"]
+        return {"code": code, "name": name, "pct": round(float(pct or 0), 2),
+                "dev": round(best["dev"], 2), "days": n,
+                "space": round(best["space"], 2),
+                "rule": ("%d日+100%%" % n) if n <= 10 else ("%d日+200%%" % n),
+                "high_days": str(high_days or "").strip(),
+                "concept": str(reason or "").split("+")[0].strip(),
+                "industry": ""}
     except Exception:
-        idx_pct = 0.0
+        return None
+
+
+def _selfcalc_deviate(limit=30):
+    """v1.8.0 开盘啦口径重做：热门股偏离值榜。
+       候选池 = 涨停池(带连板/题材) ∪ 快照涨幅榜前40（主板、当日涨幅≥3%）。
+       每只按复利区间算法算偏离值、复利反推空间、实时判断窗口，按空间升序（最接近触发在前）。
+       数据缺口/付费精准源未配 Key 时走此自算近似，标注「自算近似」。"""
+    # 候选池：涨停池（有连板/题材）+ 快照涨幅榜
+    cand = {}
+    try:
+        pool = (fetch_zt_pool() or {}).get("pool") or []
+        for r in pool:
+            code = str(r.get("code") or "")
+            if len(code) != 6 or not code.startswith(("60", "00")):
+                continue
+            cand[code] = {"name": str(r.get("name") or ""),
+                          "pct": r.get("pct"), "high_days": r.get("high_days") or "",
+                          "reason": r.get("reason") or "", "mk": 1 if code.startswith("6") else 0}
+    except Exception:
+        pass
     try:
         snap = fetch_snapshot(force=False) or {}
-        rows = snap.get("rows") or []
-    except Exception:
-        rows = []
-    out = []
-    for r in rows:
-        try:
+        for r in (snap.get("rows") or []):
             code = str(r.get("code") or "")
-            name = str(r.get("name") or "")
-            pct = float(r.get("pct") or 0)
+            if len(code) != 6 or not code.startswith(("60", "00")):
+                continue
+            try:
+                pct = float(r.get("pct") or 0)
+            except Exception:
+                pct = 0.0
+            if pct < 3.0:
+                continue
+            if code in cand:
+                try:
+                    if pct > float(cand[code]["pct"] or 0):
+                        cand[code]["pct"] = pct
+                except Exception:
+                    pass
+            else:
+                cand[code] = {"name": str(r.get("name") or ""), "pct": pct,
+                              "high_days": "", "reason": "", "mk": 1 if code.startswith("6") else 0}
+    except Exception:
+        pass
+
+    ibars = {1: _index_bars(1), 0: _index_bars(0)}
+    out = []
+    # 只拉前若干只的K线（候选按当日涨幅排序，避免逐只扫全市场）
+    ranked = sorted(cand.items(), key=lambda kv: float(kv[1].get("pct") or 0), reverse=True)[:60]
+    for code, info in ranked:
+        try:
+            bars = fetch_kline(code, info["mk"], 80) or []
         except Exception:
             continue
-        if not code or len(code) != 6:
-            continue
-        dev = pct - idx_pct
-        out.append({"code": code, "name": name, "pct": round(pct, 2),
-                    "dev": round(dev, 2), "threshold": 7.0,
-                    "hit": abs(dev) >= 7.0,
-                    "industry": str(r.get("industry") or "").strip()})
-    out.sort(key=lambda x: abs(x["dev"]), reverse=True)
+        row = _deviate_openlike_one(code, info["name"], info["pct"], info["mk"], bars,
+                                    ibars.get(info["mk"]) or [], info["high_days"], info["reason"])
+        if row:
+            out.append(row)
+    # 最接近触发（空间最小）在前；空间相同按偏离值大在前
+    out.sort(key=lambda x: (x["space"], -x["dev"]))
     out = out[:limit]
-    # 新浪快照无行业：只对入选的 limit 只并发补行业（静态、缓存复用），避免对全市场逐只查
+    # 只对入选票并发补行业（缓存复用）
     need = [x for x in out if not x["industry"]]
     if need:
         with ThreadPoolExecutor(max_workers=8) as ex:
