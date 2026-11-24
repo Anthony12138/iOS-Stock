@@ -40,7 +40,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -679,7 +679,6 @@ def src_ok(name):
 def src_fail(name, seconds=90):
     with _SRC_LOCK:
         _SRC_BLOCK[name] = time.time() + seconds
-
 
 
 _inflight = {}
@@ -1979,7 +1978,7 @@ def evaluate(q, bars, trend, p, idx_trend=None):
 
 
 def eval_single_for_detail(code, market, q, bars, tr, extra, idx_trend):
-    """归入 v1.7.9：给「不在任何扫描池里、原本没评分」的票（异动监控 / 股票搜索）
+    """给「不在任何扫描池里、原本没评分」的票（如股票搜索结果）
        点开详情时现场算一组通用评分，口径与一夜持股 evaluate() 完全一致。
 
        evaluate 只依赖 q 的 pct/turnover/volratio/fcap/main_net 五个字段（见其函数体），
@@ -1988,7 +1987,7 @@ def eval_single_for_detail(code, market, q, bars, tr, extra, idx_trend):
          - 否则用详情 q 打底，volratio/main_net 取单股补数 extra，fcap 从日K末根
            的成交额/换手反推（amount / turnover），都没有就留 0 让该维度按「不符」计。
        硬门槛 gate 不影响分数（rs_index 权重为 0），这里只要 score/grade/rules，
-       不把 gate.block 当失败——异动票本就不是按一夜持股门槛选出来的。
+       不把 gate.block 当失败——这类票本就不是按一夜持股门槛选出来的。
        任何异常都吞掉返回 None，绝不让「补评分」拖垮详情主流程。
     """
     try:
@@ -6846,8 +6845,6 @@ def _homophone_chars(ch, loose=False):
     return hit
 
 
-
-
 def _mood_build():
     hot, themes, temp, pool_n = [], {}, 50.0, 0
     try:
@@ -7041,7 +7038,7 @@ SETTINGS_KEYS = (
     "gain_min", "gain_max", "vr_min", "turn_min", "turn_max",
     "fcap_min", "fcap_max", "vol_cv_max", "min_amount", "min_amount_on", "score_min",
     "entry_time", "exclude_st", "switches", "preset", "ai", "swing", "limit",
-    "dim_common", "dim_night", "api_key", "monitor_auto", "ashare_key",
+    "dim_common", "dim_night",
 )
 
 
@@ -7581,46 +7578,6 @@ def leader_analysis(params):
                 "elapsed": round(time.time() - t0, 1)}
 
 
-# ---------------------------------------------------------------- 异动监控（同花顺扶摇主源 + 自算兜底）
-_FUYAO_HOST = "https://fuyao.aicubes.cn"
-_FUYAO_PATH = "/api/a-share/special-data/abnormal-monitor-list"
-
-
-def _ms_date(v):
-    """毫秒时间戳 → YYYY-MM-DD；扶摇返回的是毫秒，异常值回退空串。"""
-    try:
-        n = int(v)
-        if n <= 0:
-            return ""
-        return datetime.fromtimestamp(n / 1000).strftime("%Y-%m-%d") if n > 1e11 \
-            else datetime.fromtimestamp(n).strftime("%Y-%m-%d")
-    except Exception:
-        return ""
-
-
-def _fuyao_monitor(key, size=60, state_arg="current"):
-    """请求扶摇异动监控名单。返回 (state, items, msg)。
-       state: ok / invalid / missing / error。"""
-    if not key:
-        return "missing", [], "未配置 API Key"
-    url = _FUYAO_HOST + _FUYAO_PATH + "?state=%s&page=1&size=%d" % (state_arg, int(size))
-    hdr = dict(HEADERS)
-    hdr["X-API-Key"] = str(key)
-    try:
-        txt = http_text(url, timeout=8, retries=1, headers=hdr)
-        d = json.loads(txt)
-        code = d.get("code")
-        if code == 0:
-            items = ((d.get("data") or {}).get("item")) or []
-            return "ok", items, ""
-        if code == 2003:
-            msg = str(d.get("message") or "")
-            return ("missing" if "Missing" in msg else "invalid"), [], msg
-        return "error", [], str(d.get("message") or code)
-    except Exception as e:
-        return "error", [], "%s: %s" % (type(e).__name__, e)
-
-
 _IND_MAP = {}          # code -> 行业名（静态，查一次缓存复用）
 _IND_LOCK = threading.Lock()
 
@@ -7707,568 +7664,6 @@ def _fill_industry(rows, limit=60):
     return rows
 
 
-def _deviate_openlike_one(code, name, pct, mk, bars, ibars, high_days="", reason=""):
-    """v1.8.0：单只票按【开盘啦口径】算涨幅偏离值 + 距触发空间。
-       偏离值 = 个股N日【区间复利涨幅】 − 基准指数N日区间复利涨幅（不是逐日涨幅相加，大盘下跌时能正确扣减）。
-       空间   = 复利反推「从现价再涨多少百分比、复利后偏离达到阈值」：
-                空间 = (1 + 阈值 + 指数区间涨幅) ÷ (1 + 个股区间涨幅) − 1
-                阈值：10日窗口 +100%、30日窗口 +200%。
-       窗口实时判断：在 2~30 日里找「距最近阈值空间最小且为正」的那档，自动显示对应天数/规则。
-       指数末值用【实时涨跌幅】折算点位（开市更准），取不到退日K末值。
-       返回 dict；数据不足/已触发返回 None。"""
-    try:
-        cl = [float(b.get("close") or 0) for b in bars]
-        icl = [float(b.get("close") or 0) for b in ibars]
-        if len(cl) < 3 or len(icl) < 3:
-            return None
-        # 指数末值用实时涨跌幅折算（开市口径更贴近开盘啦）；失败退日K
-        live = _index_live_pct(mk)
-        if live is not None and len(icl) >= 2 and icl[-2] > 0:
-            icl[-1] = icl[-2] * (1.0 + live / 100.0)
-        best = None
-        for n in range(2, min(31, len(cl), len(icl))):
-            base, ibase = cl[-1 - n], icl[-1 - n]
-            if base <= 0 or ibase <= 0:
-                continue
-            gs = cl[-1] / base - 1.0          # 个股 N 日复利涨幅
-            gi = icl[-1] / ibase - 1.0        # 指数 N 日复利涨幅
-            dev = (gs - gi) * 100.0
-            if dev <= 0:                       # 只看上行方向（热门股偏离值为正）
-                continue
-            # 窗口→阈值：≤10日走 +100%，>10日走 +200%（交易所规则）
-            thr = 1.0 if n <= 10 else 2.0
-            space = ((1.0 + thr + gi) / (1.0 + gs) - 1.0) * 100.0
-            if space <= 0:                     # 已触发，不列入「距触发空间」榜
-                continue
-            # 挑「空间最小（最接近触发）」的那档窗口
-            if best is None or space < best["_space"]:
-                best = {"n": n, "dev": dev, "space": space, "thr": thr,
-                        "_space": space, "gs": gs, "gi": gi}
-        if not best:
-            return None
-        n = best["n"]
-        return {"code": code, "name": name, "pct": round(float(pct or 0), 2),
-                "dev": round(best["dev"], 2), "days": n,
-                "space": round(best["space"], 2),
-                "rule": ("%d日+100%%" % n) if n <= 10 else ("%d日+200%%" % n),
-                "high_days": str(high_days or "").strip(),
-                "concept": str(reason or "").split("+")[0].strip(),
-                "industry": ""}
-    except Exception:
-        return None
-
-
-def _selfcalc_deviate(limit=30):
-    """v1.8.0 开盘啦口径重做：热门股偏离值榜。
-       候选池 = 涨停池(带连板/题材) ∪ 快照涨幅榜前40（主板、当日涨幅≥3%）。
-       每只按复利区间算法算偏离值、复利反推空间、实时判断窗口，按空间升序（最接近触发在前）。
-       数据缺口/付费精准源未配 Key 时走此自算近似，标注「自算近似」。"""
-    # 候选池：涨停池（有连板/题材）+ 快照涨幅榜
-    cand = {}
-    try:
-        pool = (fetch_zt_pool() or {}).get("pool") or []
-        for r in pool:
-            code = str(r.get("code") or "")
-            if len(code) != 6 or not code.startswith(("60", "00")):
-                continue
-            cand[code] = {"name": str(r.get("name") or ""),
-                          "pct": r.get("pct"), "high_days": r.get("high_days") or "",
-                          "reason": r.get("reason") or "", "mk": 1 if code.startswith("6") else 0}
-    except Exception:
-        pass
-    try:
-        snap = fetch_snapshot(force=False) or {}
-        for r in (snap.get("rows") or []):
-            code = str(r.get("code") or "")
-            if len(code) != 6 or not code.startswith(("60", "00")):
-                continue
-            try:
-                pct = float(r.get("pct") or 0)
-            except Exception:
-                pct = 0.0
-            if pct < 3.0:
-                continue
-            if code in cand:
-                try:
-                    if pct > float(cand[code]["pct"] or 0):
-                        cand[code]["pct"] = pct
-                except Exception:
-                    pass
-            else:
-                cand[code] = {"name": str(r.get("name") or ""), "pct": pct,
-                              "high_days": "", "reason": "", "mk": 1 if code.startswith("6") else 0}
-    except Exception:
-        pass
-
-    ibars = {1: _index_bars(1), 0: _index_bars(0)}
-    out = []
-    # 只拉前若干只的K线（候选按当日涨幅排序，避免逐只扫全市场）
-    ranked = sorted(cand.items(), key=lambda kv: float(kv[1].get("pct") or 0), reverse=True)[:60]
-    for code, info in ranked:
-        try:
-            bars = fetch_kline(code, info["mk"], 80) or []
-        except Exception:
-            continue
-        row = _deviate_openlike_one(code, info["name"], info["pct"], info["mk"], bars,
-                                    ibars.get(info["mk"]) or [], info["high_days"], info["reason"])
-        if row:
-            out.append(row)
-    # 最接近触发（空间最小）在前；空间相同按偏离值大在前
-    out.sort(key=lambda x: (x["space"], -x["dev"]))
-    out = out[:limit]
-    # 只对入选票并发补行业（缓存复用）
-    need = [x for x in out if not x["industry"]]
-    if need:
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            inds = list(ex.map(lambda x: _stock_industry(x["code"]), need))
-        for x, ind in zip(need, inds):
-            x["industry"] = ind
-    return out
-
-
-# ---------------------------------------------------------------- v1.7.8 异动重做：东财停复牌 / ashareapi 精准源 / 自算触发异动
-_EM_SUSPEND_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-
-
-def _em_suspend(date_str=None, limit=40):
-    """东财停复牌一览（RPT_CUSTOM_SUSPEND_DATA_INTERFACE），免费免鉴权。
-       返回主板停牌记录：代码/名称/停牌起止/预计复牌日/期限/原因。
-       实测字段：SUSPEND_START_TIME / SUSPEND_END_TIME / PREDICT_RESUME_DATE / SUSPEND_EXPIRE / SUSPEND_REASON。
-       注意东财按源 IP 限流，只发一次请求、不翻页（一屏足够）。"""
-    d = str(date_str or last_trade_date())
-    p = {"sortColumns": "SUSPEND_START_DATE", "sortTypes": "-1", "pageSize": str(limit),
-         "pageNumber": "1", "reportName": "RPT_CUSTOM_SUSPEND_DATA_INTERFACE",
-         "columns": "ALL", "source": "WEB", "client": "WEB",
-         "filter": '(MARKET="全部")(DATETIME=\'%s\')' % d}
-    url = _EM_SUSPEND_URL + "?" + urllib.parse.urlencode(p)
-    try:
-        txt = http_text(url, timeout=8, retries=1,
-                        headers={**HEADERS, "Referer": "https://data.eastmoney.com/"})
-        j = json.loads(txt)
-        rows = ((j.get("result") or {}).get("data")) or []
-    except Exception:
-        return []
-    out = []
-    for x in rows:
-        if not isinstance(x, dict):
-            continue
-        code = str(x.get("SECURITY_CODE") or "")
-        if len(code) != 6 or not (code.startswith("60") or code.startswith("00")):
-            continue  # 只做主板
-        def _d(v):
-            s = str(v or "")
-            return s[:10] if len(s) >= 10 else s
-        out.append({"code": code, "name": str(x.get("SECURITY_NAME_ABBR") or ""),
-                    "start": _d(x.get("SUSPEND_START_TIME")),
-                    "end": _d(x.get("SUSPEND_END_TIME")),
-                    "predict": _d(x.get("PREDICT_RESUME_DATE")),
-                    "term": str(x.get("SUSPEND_EXPIRE") or ""),
-                    "reason": str(x.get("SUSPEND_REASON") or "")})
-    return out
-
-
-_EM_MONITOR_URL = "https://mobappconfig.securities.eastmoney.com/emcfg/stock_monitor.json"
-
-
-def _em_stock_monitor():
-    """东财「重点监控池」——与开盘啦「监管期证券」同源的免费静态 JSON（零鉴权）。
-       字段 STKCODE/STKNAME/MARKET/VALIDATESTARTDATE/VALIDATEENDDATE。
-       实测天普股份 605255(11-19~12-02)、新华传媒 600825(11-13~11-26) 与开盘啦逐字一致。
-       返回 (active, history)：active=当前在监窗口内，history=已过期（历史监管）。
-       只做主板 60/00，非主板全部剔除。"""
-    out_active, out_hist = [], []
-    try:
-        txt = http_text(_EM_MONITOR_URL, timeout=10, retries=2,
-                        headers={**HEADERS, "Referer": "https://vipmoney.eastmoney.com/"})
-        rows = json.loads(txt)
-    except Exception:
-        return [], []
-    today = now_cn().date().isoformat()
-    mkmap = {"1": "上交所", "0": "深交所", "B": "北交所"}
-    for x in rows if isinstance(rows, list) else []:
-        if not isinstance(x, dict):
-            continue
-        code = str(x.get("STKCODE") or "")
-        if len(code) != 6 or not (code.startswith("60") or code.startswith("00")):
-            continue
-        start = str(x.get("VALIDATESTARTDATE") or "")[:10]
-        end = str(x.get("VALIDATEENDDATE") or "")[:10]
-        name = str(x.get("STKNAME") or "").strip()
-        if not name:                      # 过滤空名（退市股等）
-            continue
-        row = {"code": code, "name": name, "market": mkmap.get(str(x.get("MARKET") or ""), "—"),
-               "label": "重点监控", "start": start, "end": end}
-        if start and end and start <= today <= end:
-            out_active.append(row)
-        elif end and end < today:
-            out_hist.append(row)
-    out_active.sort(key=lambda r: r["start"])
-    out_hist.sort(key=lambda r: r["end"], reverse=True)
-    return out_active, out_hist
-
-
-_ASHARE_MCP = "https://api.ashareapi.com/mcp"
-_ashare_id = [0]
-
-
-def _ashare_call(tool, args, key=""):
-    """调用 ashareapi 的 MCP 工具（JSON-RPC over SSE）。返回解析后的 dict，失败返回 {'_error': msg}。
-       key 为空时付费工具会返回“需要 API Key”的提示文本，据此给前端友好提示。"""
-    _ashare_id[0] += 1
-    payload = {"jsonrpc": "2.0", "id": _ashare_id[0], "method": "tools/call",
-               "params": {"name": tool, "arguments": args or {}}}
-    hdr = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-    if key:
-        hdr["Authorization"] = "Bearer " + str(key).strip()
-    try:
-        req = urllib.request.Request(_ASHARE_MCP, data=json.dumps(payload).encode("utf-8"),
-                                     headers=hdr, method="POST")
-        raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "replace")
-        data = ""
-        for line in raw.splitlines():
-            if line.startswith("data:"):
-                data = line[5:].strip()
-        j = json.loads(data) if data else {}
-        content = ((j.get("result") or {}).get("content")) or []
-        text = content[0].get("text", "") if content and isinstance(content[0], dict) else ""
-        if not text:
-            return {"_error": str(j.get("error") or "空响应")[:200]}
-        if "API Key" in text or "付费层" in text:
-            return {"_need_key": True, "_error": text[:200]}
-        try:
-            return json.loads(text)
-        except Exception:
-            return {"_text": text[:2000]}
-    except Exception as e:
-        return {"_error": "%s: %s" % (type(e).__name__, e)}
-
-
-def _ashare_test(key):
-    """测试 ashareapi Key：调付费工具 alert，判断是否需要 Key / 是否可用。"""
-    if not str(key or "").strip():
-        return {"ok": False, "msg": "请先填写 ashareapi Key"}
-    r = _ashare_call("ashare_abnormal", {"mode": "alert"}, key)
-    if r.get("_need_key"):
-        return {"ok": False, "msg": "Key 无效或额度不足（接口仍提示需要 API Key）"}
-    if r.get("_error"):
-        return {"ok": False, "msg": r["_error"]}
-    return {"ok": True, "msg": "Key 可用 · 精准异动字段已接通"}
-
-
-def _index_bars(market):
-    """主板基准指数：沪市=上证(000001/沪)，深市=深证成指(399001/深)。"""
-    code, mk = ("000001", 1) if int(market) == 1 else ("399001", 0)
-    try:
-        return fetch_kline(code, mk, 40) or []
-    except Exception:
-        return []
-
-
-def _index_live_pct(market):
-    """基准指数【实时】涨跌幅（沪=上证 s_sh000001 / 深=深证成指 s_sz399001）。
-       腾讯字段 v_s_sh000001="1~名称~代码~点位~涨跌额~涨跌幅~…"，索引 5 为涨跌幅%。
-       失败返回 None，调用方退回日K末日涨幅（离线/休市兜底）。"""
-    try:
-        sym = "s_sh000001" if int(market) == 1 else "s_sz399001"
-        txt = http_text("https://qt.gtimg.cn/q=" + sym, encoding="gbk",
-                        headers={"Referer": "https://gu.qq.com/"}, retries=1, timeout=5)
-        if '="' not in txt:
-            return None
-        f = txt.split('="', 1)[1].rstrip('";\n').split("~")
-        if len(f) > 5 and math.isfinite(float(f[5])):
-            return float(f[5])
-    except Exception:
-        pass
-    return None
-
-
-def _count_same_direction(devs):
-    """交易所规则①：滑动 3 日偏离累计 |±20%| 记一次异常波动，同向连续计数最大值。"""
-    run = 0
-    sign = 0
-    best = 0
-    for i in range(2, len(devs)):
-        w3 = sum(devs[i - 2:i + 1])
-        if abs(w3) < 20:
-            run, sign = 0, 0
-            continue
-        s = 1 if w3 > 0 else -1
-        if s == sign:
-            run += 1
-        else:
-            run, sign = 1, s
-        best = max(best, run)
-    return best
-
-
-def _selfcalc_severe_plan(limit=8):
-    """自算「今日/明日涨幅至涨停能触发严重异动」候选（沪深主板，近似口径）。
-       严格按交易所《交易规则》严重异常波动四条（证监会认定一条无法自算，跳过）：
-         ① 10日内4次同向异常波动（连续3日偏离累计 |±20%|，同向计数≥4）
-         ② 10日偏离累计 +100% / −50%
-         ③ 30日偏离累计 +200% / −70%
-         ④ 证监会/交易所认定（人工，不自算）
-       偏离值 = 个股当日 pct − 基准指数当日 pct（沪=上证/深=深证成指）；
-       当日偏离用【实时指数涨幅】，取不到退日K末日。
-       「涨幅至触发」只列上行方向且单日可达者：今日 ≤ 当日剩余涨停空间、次日 ≤ 一个涨停(10%)；
-       离阈值太远（如华东重机 need≈33%）直接剔除，不再用 need<=35 粗放纳入。
-       返回 (today, tomorrow)，行字段保持 code/name/pct/trigger_pct/trigger_price/space/period，
-       另加 rule（命中的规则说明）与 live_idx（实时指数涨幅，None 表示用了日K兜底）。"""
-    try:
-        snap = fetch_snapshot(force=False) or {}
-        rows = snap.get("rows") or []
-    except Exception:
-        rows = []
-    # 候选池：主板、当日涨幅靠前（连板/大涨最容易临近阈值），最多 18 只再拉K线
-    cand = []
-    for r in rows:
-        code = str(r.get("code") or "")
-        if len(code) != 6 or not (code.startswith("60") or code.startswith("00")):
-            continue
-        try:
-            pct = float(r.get("pct") or 0)
-        except Exception:
-            pct = 0.0
-        if pct < 3.0:
-            continue
-        cand.append((pct, code, str(r.get("name") or ""), int(r.get("market") or (1 if code.startswith("6") else 0))))
-    cand.sort(reverse=True)
-    cand = cand[:18]
-
-    sh = {b.get("date"): float(b.get("pct") or 0) for b in _index_bars(1)}
-    sz = {b.get("date"): float(b.get("pct") or 0) for b in _index_bars(0)}
-    live_sh, live_sz = _index_live_pct(1), _index_live_pct(0)
-
-    today, tomorrow = [], []
-    for pct, code, name, mk in cand:
-        mk = int(mk)
-        try:
-            bars = fetch_kline(code, mk, 80) or []   # 80 根：覆盖 30 日规则与早期异动
-        except Exception:
-            continue
-        if len(bars) < 12:
-            continue
-        idx = sh if mk == 1 else sz
-        # 逐日偏离（按日期对齐指数日K）
-        devs = []
-        for b in bars:
-            dt = str(b.get("date") or "")
-            if dt in idx:
-                devs.append(float(b.get("pct") or 0) - idx[dt])
-        if len(devs) < 12:
-            continue
-        last = bars[-1]
-        price = float(last.get("close") or 0) or 0
-        # 当日偏离用实时指数；取不到用日K末日指数涨幅（devs 末项）
-        live_idx = live_sh if mk == 1 else live_sz
-        idx_last = float(idx.get(str(last.get("date") or ""), 0)) if live_idx is None else live_idx
-        dev_today = pct - idx_last
-        d_devs = devs[:-1] + [dev_today]          # 末日替换为实时偏离
-        s10, s30 = sum(d_devs[-10:]), sum(d_devs[-30:])
-        # 规则判定（严重异动是否已触发；下行方向只提示，不混入涨幅可触发栏）
-        rules = []
-        if _count_same_direction(d_devs[-10:]) >= 4:
-            rules.append("10日内4次同向异常波动")
-        if s10 >= 100 or s10 <= -50:
-            rules.append("10日偏离%+.1f%%(阈值+100/-50)" % s10)
-        if s30 >= 200 or s30 <= -70:
-            rules.append("30日偏离%+.1f%%(阈值+200/-70)" % s30)
-        if rules:
-            continue   # 已触发严重异动，不再放进「涨幅至触发」候选
-        # 上行触发：距 10 日 +100% 还差多少（用实时偏离累计）
-        need = 100.0 - s10
-        if need <= 0:
-            continue
-        need = round(need, 2)
-        room_today = 0.0 if pct >= 9.9 else round(10.0 - pct, 2)
-        common = {"code": code, "name": name, "pct": round(pct, 2),
-                  "trigger_price": round(price * (1 + need / 100.0), 2) if price else 0,
-                  "space": need, "period": "10日+100%",
-                  "live_idx": (None if live_idx is None else round(live_idx, 2))}
-        # 今日：还需涨幅 ≤ 当日剩余涨停空间；已涨停(空间0)不入
-        if 0 < need <= room_today and room_today > 0:
-            today.append({**common, "trigger_pct": need,
-                          "rule": "今日再涨 %.2f%% 触 10日+100%%" % need})
-        # 次日：滚动掉最早一天偏离后，剩余空间 ≤ 一个涨停(10%)
-        need_t = round(need + d_devs[-10], 2)   # 明天最早一天滚出窗口
-        if 0 < need_t <= 10.0:
-            tomorrow.append({**common, "trigger_pct": need_t,
-                             "trigger_price": round(price * (1 + need_t / 100.0), 2) if price else 0,
-                             "space": need_t,
-                             "rule": "次日再涨 %.2f%% 触 10日+100%%" % need_t})
-    today.sort(key=lambda x: x["trigger_pct"])
-    tomorrow.sort(key=lambda x: x["trigger_pct"])
-    return today[:limit], tomorrow[:limit]
-
-
-def monitor_data(params=None):
-    """异动监控：严重异动 / 热门股偏离值 / 重点监控（监管期）。
-       同花顺扶摇为主源；Key 失效/缺失时返回 auth 状态供前端弹窗提醒，
-       数据切自算兜底，保证板块不出空。"""
-    t0 = time.time()
-    key = ""
-    try:
-        key = str(load_settings().get("api_key") or "").strip()
-    except Exception:
-        pass
-    want = 60
-    try:
-        want = max(10, min(int((params or {}).get("size", 30)), 30))  # 扶摇 size 上限约 30~49，取 30 稳妥
-    except Exception:
-        pass
-
-    state, items, msg = _fuyao_monitor(key, want)
-    auth = "ok" if state == "ok" else state
-
-    severe = []
-    if state == "ok":
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            code = str(it.get("thscode") or "").split(".")[0]
-            # 本工具只做主板：60xxxx / 00xxxx，剔除科创(688)/创业(30)/转债(11)/北交(8/4)
-            if not (code.startswith("60") or code.startswith("00")) or len(code) != 6:
-                continue
-            label = str(it.get("monitor_label") or "")
-            row = {"code": code, "name": str(it.get("name") or ""),
-                   "label": label, "type": it.get("monitor_type"),
-                   "start": _ms_date(it.get("start_date_ms")),
-                   "end": _ms_date(it.get("end_date_ms"))}
-            if "严重异动" in label or it.get("monitor_type") == 2:
-                severe.append(row)
-
-    # v1.7.8 补充：重点监控（监管期）换源为东财重点监控池（与开盘啦同源），
-    # 扶摇该接口只有「严重异动」一种类型、无重点监控，原实现导致该页恒空。
-    watch, watch_history = _em_stock_monitor()
-
-    def _dedup(seq):
-        seen, out = {}, []
-        for r in seq:
-            if r["code"] in seen:
-                continue
-            seen[r["code"]] = 1
-            out.append(r)
-        return out
-    severe = _dedup(severe)
-
-    # v1.7.8 三段式：今日/明日触发异动（自算 or ashareapi 精准），近期严重异动（扶摇 history）
-    ashare_key = ""
-    try:
-        ashare_key = str(load_settings().get("ashare_key") or "").strip()
-    except Exception:
-        pass
-    plan_today, plan_tomorrow = _selfcalc_severe_plan()
-    plan_source = "selfcalc"
-    if ashare_key:
-        a = _ashare_call("ashare_abnormal", {"mode": "deviation_plan"}, ashare_key)
-        if not a.get("_error") and not a.get("_need_key"):
-            rows = a.get("data") or a.get("items") or (a.get("result") or {}).get("data") or []
-            if isinstance(rows, list) and rows:
-                def _amap(x):
-                    if not isinstance(x, dict):
-                        return None
-                    code = str(x.get("code") or x.get("symbol") or "").split(".")[0]
-                    if len(code) != 6 or not (code.startswith("60") or code.startswith("00")):
-                        return None
-                    try:
-                        tp = float(x.get("trigger_pct") or 0)
-                    except Exception:
-                        tp = 0.0
-                    return {"code": code, "name": str(x.get("name") or ""),
-                            "pct": x.get("pct"), "trigger_pct": round(tp, 2),
-                            "trigger_price": x.get("limit_price") or x.get("price"),
-                            "space": x.get("space") or round(tp, 2),
-                            "concepts": x.get("concepts") or "",
-                            "period": "10日100%"}
-                mapped = [m for m in (_amap(x) for x in rows) if m]
-                if mapped:
-                    plan_today = mapped[:8]
-                    plan_tomorrow = mapped[8:16]
-                    plan_source = "ashareapi"
-
-    # 近期严重异动：history 最近主板记录（补“异动日期/状态/次日涨幅”）
-    # 判定 10日/30日：监控起止跨度 ≤14 自然日≈10个交易日→10日100%，否则→30日200%。
-    # 次日涨幅：异动开始日后一根日K的 pct（有就取，无则留空由前端显示“—”）。
-    recent = []
-    if state == "ok":
-        hstate, hitems, _ = _fuyao_monitor(key, want, "history")
-        if hstate == "ok":
-            for it in hitems[:want]:
-                if not isinstance(it, dict):
-                    continue
-                code = str(it.get("thscode") or "").split(".")[0]
-                if len(code) != 6 or not (code.startswith("60") or code.startswith("00")):
-                    continue
-                # v1.7.8：过滤空名记录（多为已退市股，如 002731 萃华退，扶摇 name=null）
-                nm = str(it.get("name") or "").strip()
-                if not nm:
-                    continue
-                start = _ms_date(it.get("start_date_ms"))
-                end = _ms_date(it.get("end_date_ms"))
-                period = "10日100%"
-                try:
-                    span = (datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(start, "%Y-%m-%d")).days
-                    if span > 14:
-                        period = "30日200%"
-                except Exception:
-                    pass
-                recent.append({"code": code, "name": nm,
-                               "date": start, "label": str(it.get("monitor_label") or ""),
-                               "period": period, "next_pct": None, "end": end})
-            recent = _dedup(recent)[:8]
-            # v1.7.8：给全部记录补次日涨幅（此前只补前5只）；K线拉 80 根覆盖较早异动日（40 根最早只到约2个月前，覆盖不到 8/9 月的记录）
-            for r in recent:
-                try:
-                    mk = 1 if r["code"].startswith("6") else 0
-                    bars = fetch_kline(r["code"], mk, 80) or []
-                    for i, b in enumerate(bars):
-                        if str(b.get("date") or "") == r["date"] and i + 1 < len(bars):
-                            r["next_pct"] = round(float(bars[i + 1].get("pct") or 0), 2)
-                            break
-                except Exception:
-                    pass
-
-    # 停复牌：东财免费源（预计复牌日）
-    suspend = _em_suspend()
-    smap = {s["code"]: s for s in suspend}
-
-    # 历史监管证券：东财已过期段 + 扶摇 history 主板记录，按结束日倒序，去掉当前仍在监的
-    active_codes = {w["code"] for w in watch}
-    wh = list(watch_history)
-    for r in (recent or []):
-        if r["code"] in active_codes:
-            continue
-        wh.append({"code": r["code"], "name": r["name"], "market": "上交所" if r["code"].startswith("6") else "深交所",
-                   "label": "重点监控", "start": r.get("date") or r.get("start") or "", "end": r.get("end") or ""})
-    seen_wh, watch_history = set(), []
-    for w in sorted(wh, key=lambda x: str(x.get("end") or ""), reverse=True):
-        if w["code"] in seen_wh or w["code"] in active_codes:
-            continue
-        seen_wh.add(w["code"])
-        watch_history.append(w)
-    watch_history = watch_history[:8]
-
-    deviate = _selfcalc_deviate()
-    data_date = last_trade_date()
-    try:
-        snap = fetch_snapshot(force=False) or {}
-        if snap.get("data_date"):
-            data_date = snap["data_date"]
-    except Exception:
-        pass
-
-    # v1.7.8：异动监控四张表都要显示行业；只对当前展示票补，复用 _stock_industry 缓存
-    _fill_industry(severe + plan_today + plan_tomorrow + recent + deviate + watch + watch_history, limit=60)
-    return {"ok": True, "mode": "monitor", "auth": auth,
-            "auth_msg": msg, "source": "fuyao" if state == "ok" else "fallback",
-            "severe": severe, "deviate": deviate, "watch": watch, "watch_history": watch_history,
-            "plan_today": plan_today, "plan_tomorrow": plan_tomorrow,
-            "recent": recent, "suspend": suspend, "suspend_map": smap,
-            "plan_source": plan_source, "ashare_on": bool(ashare_key),
-            "date": data_date, "elapsed": round(time.time() - t0, 1),
-            "market": market_status()}
-
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -8341,12 +7736,6 @@ class Handler(BaseHTTPRequestHandler):
                                    "auto_exit": not LIGHT,   # PC=True：前端据此注册关页退出
                                    "server_time": now_cn().strftime("%Y-%m-%d %H:%M:%S")})
 
-            if path == "/api/monitor":   # 异动监控：扶摇名单 + 东财停复牌 + 自算/ashareapi 触发异动
-                return self._json(monitor_data({k: v[0] for k, v in qs.items()}))
-
-            if path == "/api/ashare-test":   # v1.7.8：测试 ashareapi Key 是否可用
-                k = (qs.get("key") or [""])[0] or str(load_settings().get("ashare_key") or "")
-                return self._json(_ashare_test(k))
 
             if path == "/api/bye":   # sendBeacon 不可用时的 GET 兜底
                 schedule_bye_exit()
@@ -8517,7 +7906,7 @@ class Handler(BaseHTTPRequestHandler):
                         "prev_day": prev_day,
                         "extra": extra,
                         "trade": trade, "metrics": detail_metrics(bars)}
-                # 归入 v1.7.9：异动监控 / 股票搜索打开的票不在任何扫描池、原本没评分。
+                # 股票搜索打开的票不在任何扫描池、原本没评分。
                 # 前端带 need_score=1 时，用刚拉好的行情现场算一组通用评分随详情返回，
                 # 让这类票也能看到等级 / 分数 / 打分明细（见 eval_single_for_detail）。
                 _idx_tr = None
