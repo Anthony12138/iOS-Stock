@@ -112,6 +112,8 @@
      主栏 top=--hdrH / z:59，子栏 top=--hdrH+--mainTabH / z:58，两层紧贴不互相盖。 */
   .tabs{display:flex;gap:4px;margin-bottom:14px;position:sticky;top:var(--hdrH,62px);z-index:59;
     background:rgba(10,14,22,.96);backdrop-filter:blur(10px)}
+  /* v1.8.1：主板块选择栏整行居中；safe center 在窄屏放不下时退回靠左，避免第一个按钮被裁掉滚不到 */
+  #topTabs{justify-content:center;justify-content:safe center}
   .tabs.subtabs{top:calc(var(--hdrH,62px) + var(--mainTabH,44px));z-index:58}
   .tab{
     padding:7px 15px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);
@@ -1421,7 +1423,7 @@
   <section id="view-ai" style="display:none">
     <div class="ai-head">
       <div>
-        <h2>AI 多因子选股 · 主板</h2>
+        <h2>AI 荐股 · 主板</h2>
         <div class="desc">
           先按资金 + 量比 + 涨幅 + 换手从全市场主板初筛，再对候选池逐只计算指标，按六维加权打分：<br />
           <b style="color:#CBD5E5">技术 32%</b>（MACD 金叉/多头、KDJ 金叉、BOLL 突破/中轨、均线多头、量价齐升）
@@ -4739,7 +4741,7 @@ let presetScanChain = Promise.resolve();       // 串行队列：一组「fast�
 function scanPresetSwitch() {
   const token = ++presetScanToken;
   // v1.8.1：切换时显示刷新等待浮层（fast 阶段通常 1 秒内秒出），完整复核静默
-  setLoading(true, '正在用缓存刷新评分', '按新评分标准重新换算候选（宽松/标准）', 70);
+  setLoading(true, '正在用缓存刷新评分', '按对应评分标准重新筛选候选股票（宽松/标准）', 70);
   let loadingOpen = true;
   const closeLoading = () => { if (loadingOpen) { loadingOpen = false; setLoading(false); } };
   presetScanChain = presetScanChain.catch(() => {}).then(async () => {
@@ -6111,7 +6113,7 @@ async function aiFullScan(swing, token, fastList) {
 }
 
 /* v1.8.1：开关变化（开/关对称）——清空 → 缓存换算 → 自动完整复核。
-   开多日持股→swing 口径；关→AI 多因子口径，都按新评分标准用缓存现算，
+   开多日持股→多日持股口径；关→AI 荐股口径，都按对应标准用缓存现算，
    不再「关掉时恢复旧结果」（那是『关了卡片不更新』的根源）。
    切换全程显示等待浮层（fast 阶段），busy 时排队重试直到真正重绘。 */
 async function aiOnAlgoChange() {
@@ -6126,11 +6128,11 @@ async function aiOnAlgoChange() {
   renderAI();
 
   // v1.8.1：显示刷新等待浮层（复用 #overlay，fast 阶段通常 1 秒内秒出）
-  setLoading(true, '正在用缓存刷新评分', '按新' + (swing ? '多日持股' : 'AI 多因子') + '标准重新换算候选', 70);
+  setLoading(true, '正在用缓存刷新评分', '按对应' + (swing ? '多日持股' : 'AI 荐股') + '标准重新筛选候选股票', 70);
   const loadingShown = true;
   const closeLoading = () => setLoading(false);
 
-  const loadingText = swing ? AI_SWING_LOADING : '正在按 AI 多因子口径换算…<br /><span style="font-size:11px;color:#5F6B80">用上次扫描缓存的日K重算，约 1–3 秒</span>';
+  const loadingText = swing ? AI_SWING_LOADING : '正在按 AI 荐股口径换算…<br /><span style="font-size:11px;color:#5F6B80">用上次扫描缓存的日K重算，约 1–3 秒</span>';
   const slowText = swing ? AI_SWING_SLOW : '缓存不足，正在按完整口径扫描…<br /><span style="font-size:11px;color:#5F6B80">约 20–40 秒，不用再点按钮</span>';
   aiEmptyText(loadingText);
   try {
@@ -6155,7 +6157,11 @@ async function aiOnAlgoChange() {
     state.aiLoading = false;
     applyAIResult(r);
     closeLoading();
-    aiShowNotice('work', `快速换算完成 · 命中缓存 <b>${r.cache_hit}/${r.cache_pool}</b> 只 · 正在按完整口径复核…`);
+    // v1.8.1：兜底——后端若没返回 cache_hit/cache_pool，不再显示 undefined，
+    // 只用「快速换算完成 · 正在按完整口径复核…」（普通 AI 荐股现已补 fast，正常都会带这两个字段）
+    const hitTxt = (r.cache_hit != null && r.cache_pool != null)
+      ? `命中缓存 <b>${r.cache_hit}/${r.cache_pool}</b> 只 · ` : '';
+    aiShowNotice('work', `快速换算完成 · ${hitTxt}正在按完整口径复核…`);
     await aiFullScan(swing, token, r.list || []);
   } catch (e) {
     if (token !== aiToken) { closeLoading(); return; }

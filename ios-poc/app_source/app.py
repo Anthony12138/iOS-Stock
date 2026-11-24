@@ -3231,6 +3231,9 @@ def ai_pick(params):
         r["algo"] = "swing"
         r["note"] = "已按「多日持股」趋势波段口径筛选（本页开关，仅对 AI 荐股生效）。" + (r.get("note") or "")
         return r
+    # v1.8.1：普通 AI 荐股（多日持股关）也支持 fast 缓存快速换算——只读已缓存日K，
+    # 不额外联网，评分函数 ai_evaluate 与完整扫描完全相同，字段与 swing/scan fast 对齐。
+    fast = str((params or {}).get("fast") or "") in ("1", "true", "yes")
     p = dict(AI_DEFAULTS)
     for k, v in (params or {}).items():
         if k in p and v not in (None, ""):
@@ -3281,7 +3284,8 @@ def ai_pick(params):
         return fund + min(q["volratio"], 4) * 3 + q["pct"] * 1.2 + min(q["turnover"], 20) * 0.5
 
     # 备用源缺量比时，先用腾讯批量补齐，否则资金维度会全线失真
-    if any(not q["volratio"] for q in base):
+    # v1.8.1：fast 缓存换算不联网，缺量比的票直接参与评分（资金维度按缺失处理），不补
+    if (not fast) and any(not q["volratio"] for q in base):
         base, filled = enrich_volratio(base)
         if filled:
             source += "+腾讯"
@@ -3292,7 +3296,8 @@ def ai_pick(params):
     cand = [dict(q) for q in base[: int(p["universe"])]]
     # v1.7.6：新浪源没有主力净额，这里对候选池（仅百来只）用东财 ulist 批量补回，
     # 让资金维度评分与列表「主力净额」列都有真实值。东财源正常时无需补，零开销。
-    if any("main_net" in (q.get("_miss") or []) for q in cand):
+    # v1.8.1：fast 缓存换算不联网，缺主力净额的票按缺失处理，不补
+    if (not fast) and any("main_net" in (q.get("_miss") or []) for q in cand):
         cand, _nf = enrich_main_net(cand)
         if _nf:
             source += "+主力净额"
@@ -3302,9 +3307,15 @@ def ai_pick(params):
 
     def work(q):
         try:
-            bars = fetch_kline(q["code"], q["market"], 160, q.get("name", ""))
-            if len(bars) < 120:
-                return None
+            if fast:
+                # v1.8.1：只读缓存日K，绝不联网；没有足够缓存的票本次不参与（不重扫补数据）
+                bars = cache_peek(f"k:{q['market']}:{q['code']}", FAST_KLINE_MAX_AGE)
+                if not bars or len(bars) < 130:
+                    return None
+            else:
+                bars = fetch_kline(q["code"], q["market"], 160, q.get("name", ""))
+                if len(bars) < 120:
+                    return None
             # 每只票 swing_metrics 只算一次：评分复用其中的 ADX/MFI/筹码/布林，
             # 入选票的详情指标与交易计划也复用它，不再一只票算三遍全套
             sm = swing_metrics(bars)
@@ -3318,6 +3329,19 @@ def ai_pick(params):
     results, errors = _deep_scan(cand, work, _wn(12),
                                  int(p["top"]) + 6, int(p["top"]) + 18)
 
+    # v1.8.1：fast 缓存换算——命中太少（冷启动/缓存过期）时报 insufficient，
+    # 由前端直接改走完整扫描；不再拿子集冒充结果，也不再显示 undefined。
+    if fast and len(results) < 3:
+        return {
+            "ok": True, "mode": "ai", "fast": True, "insufficient": True,
+            "cache_hit": len(results), "cache_pool": len(cand),
+            "source": source, **snap_meta(pack),
+            "total": len(rows), "base": len(base), "deep": len(cand),
+            "hit": 0, "list": [], "params": p,
+            "elapsed": round(time.time() - t0, 1),
+            "note": "本地缓存不足，请先点「开始 AI 选股」拉取完整数据。",
+        }
+
     results.sort(key=lambda x: (-x["score"], -x["ind_count"]))
     passed = [x for x in results if x["score"] >= p["min_score"] and x["ind_count"] >= p["min_ind"]]
     top = passed[: int(p["top"])]
@@ -3329,6 +3353,13 @@ def ai_pick(params):
         x["trade"] = trade_plan("ai", None, x.get("price"), m=sm, pre=pre)
 
     _fill_industry(top, limit=40)
+    _fast_meta = {}
+    if fast:
+        _fast_meta = {
+            "fast": True, "partial": True,
+            "cache_hit": len(results), "cache_pool": len(cand),
+            "note": f"缓存换算：命中 {len(results)}/{len(cand)} 只，用已缓存日K按完整评分标准筛选，未额外联网；未命中缓存的候选本次不参与。",
+        }
     return {
         "ok": True, "source": source, "env": env, **snap_meta(pack),
         "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
@@ -3339,6 +3370,7 @@ def ai_pick(params):
         "list": top,
         "params": p,
         "note": _cap_note + "消息面仅统计交易所披露的机构调研（近30日），不含公告与研报评级：免费接口没有可靠数据源，不编造指标。",
+        **_fast_meta,
     }
 
 
