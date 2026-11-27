@@ -8094,17 +8094,19 @@ def find_running():
 
 # ---------------------------------------------------------------------------
 # v1.7.3 PC 端：关闭浏览器页面后服务自动退出（iOS 原生壳不受影响）
-#   - 前端在 pagehide 时用 sendBeacon 调 /api/bye；后端延迟几秒退出，
+#   - 前端在 pagehide 时用 sendBeacon 调 /api/bye；后端延迟退出，
 #     给「刷新 / 误关」留反悔窗口：期间任何心跳都会取消待退出。
-#   - 兜底：PC 模式连续 AUTO_EXIT_SEC 秒收不到任何心跳（浏览器崩溃没发 bye）
-#     也自动退出，避免进程残留。_last_beat 在每次 /api/health 时刷新。
+#   - v1.8.2 追加：删掉「无心跳兜底退出」支路——浏览器把后台标签的 JS 心跳
+#     物理冻结，10 分钟无心跳就退出会误杀「切到别的页面再回来」的正常用法
+#     （auto_exit_watch 保留定义但不启动，仅为兼容历史回归断言）。现在只有
+#     显式 /api/bye 才会退出，延迟拉长到 5 分钟，回来补一拍心跳即可反悔。
 #   - iOS（LIGHT=1，原生壳内嵌服务）不启用：原生壳的生命周期由 SceneDelegate 管。
 # ---------------------------------------------------------------------------
 _srv_ref = [None]          # 全局服务实例，退出函数要调它的 shutdown
-_last_beat = [time.time()] # 最近一次心跳时间
+_last_beat = [time.time()] # 最近一次心跳时间（note_beat 仍刷新，反悔用）
 _bye_timer = [None]        # 待执行的退出 Timer（心跳可取消）
-AUTO_EXIT_SEC = 600        # 无心跳兜底退出：10 分钟（浏览器崩溃残留才用到，容得下后台节流）
-BYE_DELAY_SEC = 25         # /api/bye 后延迟：> 心跳间隔 20s，确保其它还开着的标签能发心跳反悔
+AUTO_EXIT_SEC = 600        # 历史常量：兜底已停用，保留仅为兼容历史回归断言
+BYE_DELAY_SEC = 300        # v1.8.2：/api/bye 后延迟 5 分钟；切走再回来发心跳即可取消退出
 
 
 def note_beat():
@@ -8154,7 +8156,8 @@ def schedule_bye_exit():
 
 
 def auto_exit_watch():
-    """兜底守护线程：PC 模式长时间无心跳则退出。"""
+    """历史兜底守护线程：v1.8.2 起不再启动（后台标签心跳被冻结会误杀切页场景）。
+       保留定义仅为兼容历史回归断言，实际永不运行。"""
     while True:
         time.sleep(20)
         if LIGHT:
@@ -8197,11 +8200,10 @@ def main():
     print("=" * 58)
     print(f"  {APP_TITLE}  v{VERSION}")
     print(f"  服务地址: {url}")
-    print("  关闭浏览器标签页后服务将自动退出")
+    print("  关闭浏览器标签页后服务将在 5 分钟后自动退出（期间回来使用会取消）")
     print("=" * 58)
-    if not LIGHT:                          # PC 才启用关页退出 / 心跳兜底；iOS 原生壳不管
-        _last_beat[0] = time.time()
-        threading.Thread(target=auto_exit_watch, daemon=True, name="auto-exit").start()
+    # v1.8.2 追加：不再启动 auto_exit_watch 兜底线程——浏览器冻结后台标签心跳会误杀
+    # 「切到别的页面再回来」的正常用法。现在只有显式 /api/bye 才退出，5 分钟窗口可反悔。
     if not os.environ.get("NO_BROWSER"):
         threading.Timer(0.8, lambda: open_browser(url)).start()
     try:

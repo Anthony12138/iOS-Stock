@@ -172,9 +172,13 @@
     width:29px;height:29px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none}
   .fm-x:hover{color:var(--gold);border-color:var(--gold)}
   .fm-body{overflow:auto;flex:1}
-  .fm table{width:100%;border-collapse:collapse;font-size:12px}
-  .fm th{color:var(--muted2);font-size:10.5px;font-weight:500;padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}
-  .fm td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.04);color:#C4D0E2}
+  /* v1.8.2 追加：表头/内容统一居中 + 四列定宽，避免左表头右数据错位；屏蔽弹窗表头继承全局的 sticky/可排序光标 */
+  .fm table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+  .fm thead th{position:static;background:transparent;cursor:default;white-space:nowrap}
+  .fm th{color:var(--muted2);font-size:10.5px;font-weight:500;padding:8px 12px;text-align:center;border-bottom:1px solid var(--line)}
+  .fm td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.04);color:#C4D0E2;text-align:center}
+  /* v1.8.2 追加：涨幅上色被 .fm td 的 color 高优先级覆盖，这里补回红涨绿跌 */
+  .fm td.up{color:var(--up)}.fm td.down{color:var(--down)}.fm td.flat{color:var(--muted)}
   .fm tbody tr{cursor:pointer}
   .fm tbody tr:hover{background:rgba(233,185,73,.06)}
   .fm-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--line);
@@ -897,6 +901,9 @@
   .banner.on{display:block}
   /* v1.8.3：banner 内按板块情况追加的一行（金色，细分隔线） */
   .banner .b-extra{display:block;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.12);color:var(--gold)}
+  /* v1.8.2 追加：只有金色补充、没有主文案时——去掉空行与分隔线，水平靠左、框内纵向居中 */
+  .banner.only-note{display:flex;align-items:center;min-height:44px;padding:8px 14px}
+  .banner.only-note .b-extra{margin-top:0;padding-top:0;border-top:0}
 
   @media (max-width:1180px){
     .main{grid-template-columns:1fr}
@@ -2016,7 +2023,7 @@
       <div class="fm-x" id="funnelModalClose" title="关闭">×</div>
     </div>
     <div class="fm-body">
-      <table><thead><tr><th style="width:40%">股票名</th><th>股价</th><th>涨幅</th><th>行业</th></tr></thead>
+      <table><colgroup><col style="width:40%"><col style="width:20%"><col style="width:20%"><col style="width:20%"></colgroup><thead><tr><th>股票名</th><th>股价</th><th>涨幅</th><th>行业</th></tr></thead>
       <tbody id="funnelModalBody"></tbody></table>
     </div>
     <div class="fm-foot">
@@ -2549,8 +2556,10 @@ function setBanner(kind, text, note) {
   const b = $('#banner');
   if (!b) return;
   // v1.7.6：战法规则页任何提示条都不显示（异常/扫描失败路径也会走到这里）。
-  if (state.view === 'strategy') { b.classList.remove('on'); b.classList.remove('info'); b.textContent = ''; return; }
+  if (state.view === 'strategy') { b.classList.remove('on'); b.classList.remove('info'); b.classList.remove('only-note'); b.textContent = ''; return; }
   b.classList.toggle('info', kind === 'info');
+  // v1.8.2：主文案为空、只有金色补充时走紧凑样式——水平靠左、框内纵向居中、无空行与分隔线
+  b.classList.toggle('only-note', !text && !!note);
   b.classList.add('on');
   b.textContent = text;                 // textContent 天然防注入
   if (note) {
@@ -2734,7 +2743,8 @@ health(); setInterval(() => { if (!state.paused) health(); }, 20000);
    平台判断只用后端的 auto_exit 标志（PC=True / iOS=False）——不能用 __appPause：
    前端是 PC/iOS 同一份文件，__appPause 在两端都会被定义，判断会恒真、PC 永不退出。
    pagehide 在关闭/刷新/导航离开时触发，用 sendBeacon 保证关闭瞬间也能送达；
-   后端延迟 25 秒退出，刷新后新页面 health 会取消——误关/刷新不会真的杀掉服务。 */
+   v1.8.2 起后端延迟 5 分钟退出，切走后 5 分钟内回来（刷新/新标签）health 会取消——
+   误关/切页/刷新不会真的杀掉服务。后端的「10 分钟无心跳兜底」已停用。 */
 window.addEventListener('pagehide', () => {
   if (window.__autoExit !== true) return;                // 后端未开启（iOS / 未确认）就不发
   try {
@@ -2927,7 +2937,7 @@ SET_NUMS.forEach(id => {
 /* 失败横幅：只要下一次拉到数据就撤掉，不留着当摆设 */
 function clearBanner() {
   const b = $('#banner');
-  if (b && b.classList.contains('on')) { b.classList.remove('on'); b.classList.remove('info'); b.textContent = ''; }
+  if (b && b.classList.contains('on')) { b.classList.remove('on'); b.classList.remove('info'); b.classList.remove('only-note'); b.textContent = ''; }
 }
 
 async function scan(silent, fast, extSignal, force) {
@@ -3108,7 +3118,14 @@ function renderFunnelRows() {
   $('#funnelModalPrev').disabled = fmPage <= 1;
   $('#funnelModalNext').disabled = fmPage >= pages;
   body.querySelectorAll('tr[data-code]').forEach(tr => {
-    tr.onclick = () => { closeFunnelModal(); openDetail(tr.dataset.code, +tr.dataset.market); };
+    // v1.8.2 追加：漏斗前几段的票被后续条件筛掉、不在 state.data.list 里，
+    // openDetail 在池里 find 不到会静默 return（表现为只关弹窗）。把当前行作为
+    // extraItem 传进去，任何一段都能进详情（龙头详情已有同款先例）。
+    tr.onclick = () => {
+      const row = slice.find(x => x.code === tr.dataset.code);
+      closeFunnelModal();
+      openDetail(tr.dataset.code, +tr.dataset.market, row || null);
+    };
   });
 
   // 新浪快照没有行业：只补当前页缺失的票，按页缓存，不拖慢扫描首屏
