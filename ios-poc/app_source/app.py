@@ -40,7 +40,7 @@ except Exception:
     _TZ = timezone(timedelta(hours=8))          # 中国无夏令时，固定 UTC+8 等价
 
 APP_TITLE = "一夜持股战法 · A股筛选系统"
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 HOST = "127.0.0.1"
 BASE_PORT = 8765
 
@@ -5717,11 +5717,26 @@ def scan(params, fast=False):
 
     funnel = []
 
-    def stage(name, items, note):
-        funnel.append({"name": name, "count": len(items), "note": note})
+    def stage(name, items, note, with_rows=True):
+        # v1.8.2：漏斗每段带一遍精简股票行，供前端点段落后弹窗展示。
+        # 全市场主板 3000+ 只不塞进首屏响应，也不开放点击。
+        row = {"name": name, "count": len(items), "note": note}
+        if with_rows:
+            def _brief(q):
+                try:
+                    pct = round(float(q.get("pct") or 0), 2)
+                except Exception:
+                    pct = 0.0
+                return {
+                    "code": str(q.get("code") or ""), "name": str(q.get("name") or ""),
+                    "market": q.get("market"), "price": q.get("price"), "pct": pct,
+                    "industry": str(q.get("industry") or ""),
+                }
+            row["rows"] = [_brief(q) for q in items]
+        funnel.append(row)
         return items
 
-    stage("全市场主板", snap, "沪深主板全部个股")
+    stage("全市场主板", snap, "沪深主板全部个股", with_rows=False)
 
     # ① 涨幅 + 基础剔除
     s1 = []
@@ -5910,7 +5925,7 @@ def scan(params, fast=False):
 
 
 # ---------------------------------------------------------------- 历史 / 自选
-# 复盘清单同一天共用一份文件（尤其 add_pick），读-改-写必须串行 + 原子替换，
+# 复盘清单读-改-写必须串行 + 原子替换，
 # 否则自动重扫期间连点「＋」或多页面同时操作会互相覆盖，只剩最后一次写入。
 _hist_lock = threading.Lock()
 _settings_lock = threading.Lock()
@@ -5979,78 +5994,9 @@ def save_scan(payload):
     return {"ok": True, "file": fn, "count": len(items)}
 
 
-def add_pick(payload):
-    """详情页「＋」：把单只个股加进当天的复盘清单。
-
-    与「保存本次选股」的区别：不设评分门槛、一只也能建单，同一天共用一份文件，
-    重复加入只更新价格与评分，不会出现两条一样的票。
-    整段读-改-写用写锁串行 + 原子替换，避免连点 / 多页面并发只剩最后一只。"""
-    ts = now_cn()
-    day = ts.strftime("%Y-%m-%d")
-    code = str(payload.get("code") or "").strip()
-    if not (code.isdigit() and len(code) == 6):
-        return {"ok": False, "error": "股票代码不合法"}
-
-    try:
-        price = float(payload.get("price") or 0)
-    except Exception:
-        price = 0.0
-    try:
-        score = float(payload.get("score") or 0)
-    except Exception:
-        score = 0.0
-    try:
-        market = int(payload.get("market"))
-    except (TypeError, ValueError):
-        market = 1 if code.startswith("6") else 0
-    item = {
-        "code": code,
-        "name": str(payload.get("name") or code),
-        "market": market,
-        "buy": round(price, 2),
-        "score": round(score, 1),
-        "grade": str(payload.get("grade") or ""),
-        "pct": payload.get("pct") or 0,
-        "tags": [t for t in (payload.get("tags") or []) if isinstance(t, str)][:4],
-        "mode": str(payload.get("mode") or "scan"),
-        "buy_ok": bool(payload.get("buy_ok", True)),
-        "stop": (payload.get("trade") or {}).get("stop"),
-        "target": (payload.get("trade") or {}).get("target"),
-    }
-    with _hist_lock:
-        os.makedirs(HIST_DIR, exist_ok=True)
-        fn = f"manual_{day}.json"
-        path = os.path.join(HIST_DIR, fn)
-        if os.path.exists(path):
-            try:
-                with open(path, encoding="utf-8") as f:
-                    body = json.load(f)
-            except Exception:
-                body = {}
-        else:
-            body = {}
-        if (not isinstance(body, dict) or not isinstance(body.get("items"), list)
-                or not body["items"]):
-            stamp = ts.strftime("%Y-%m-%d %H:%M:%S")
-            body = {"saved_at": stamp, "ts": stamp, "market": market,
-                    "params": {"src": "手动加入"}, "items": []}
-
-        idx = next((i for i, x in enumerate(body["items"])
-                    if isinstance(x, dict) and x.get("code") == code), None)
-        dup = idx is not None
-        if dup:
-            body["items"][idx] = {**body["items"][idx], **item}
-        else:
-            body["items"].append(item)
-        body["updated_at"] = ts.strftime("%Y-%m-%d %H:%M:%S")
-        _write_json_atomic(path, body)
-        count = len(body["items"])
-    return {"ok": True, "file": fn, "count": count, "dup": dup}
-
-
 def delete_scans(files):
-    """多选删除整条选股记录；与 add_pick / save_scan 共用 _hist_lock，
-       否则并发的 add_pick 会把刚删掉的文件重新写回来（删除被静默撤销）。"""
+    """多选删除整条选股记录；与 save_scan 共用 _hist_lock，
+       否则并发的保存会把刚删掉的文件重新写回来（删除被静默撤销）。"""
     removed = []
     with _hist_lock:
         for fn in files or []:
@@ -6069,7 +6015,7 @@ def delete_scans(files):
 
 def remove_scan_items(fn, codes):
     """多选删除某条记录里的个股；删空则整条记录一起删掉。
-       整段读-改-写与删除都在 _hist_lock 内：避免与 add_pick 丢失更新，
+       整段读-改-写与删除都在 _hist_lock 内：避免与保存丢失更新，
        也避开 Windows 上读句柄未关时 os.replace 抛 WinError 5。"""
     name = os.path.basename(str(fn))
     p = os.path.join(HIST_DIR, name)
@@ -7218,21 +7164,36 @@ def _dc_board_page(t, pz=100):
     """东财 datacenter 板块资金流榜（主源）。t=2 行业 / t=3 概念。
        返回结构对齐 push2 的 page：total + diff[{f12,f14,f3,f62,f6,f21,f104,f105,f8,f10,f128,f136}]。
        datacenter 没有成交额 / 涨跌家数 / 换手 / 量比，用比值列与估算值填充，
-       板块筛选主要看 f62 主力净额、f3 涨幅、f14 名称，这些都有真实值。"""
+       板块筛选主要看 f62 主力净额、f3 涨幅、f14 名称，这些都有真实值。
+       v1.8.2：当日资金榜尚未生成时（盘前 / 早盘常见），回退到最近交易日，
+       不再误报「板块资金榜接口暂时无响应」。"""
     rn = "RPT_INDUSTRY_FUNDFLOW" if t == 2 else "RPT_CONCEPT_FUNDFLOW"
-    # 按最近交易日过滤，避免历史数据按净流入排序把旧日期的高值顶到前面
     td = last_trade_date()
-    flt = urllib.parse.quote("(TRADE_DATE='%s')" % td) if td else ""
-    u = ("https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=%s"
-         "&columns=ALL&pageNumber=1&pageSize=%d&sortColumns=NET_INFLOW&sortTypes=-1"
-         "&source=WEB&client=WEB" % (rn, pz))
-    if flt:
-        u += "&filter=" + flt
-    j = http_json(u, timeout=10, retries=1) or {}
-    if not j.get("success"):
-        raise RuntimeError("datacenter board: %s" % j.get("message"))
-    result = j.get("result") or {}
-    rows = result.get("data") or []
+
+    def _fetch(flt, sort_cols, sort_types):
+        u = ("https://datacenter-web.eastmoney.com/api/data/v1/get?reportName={rn}"
+             "&columns=ALL&pageNumber=1&pageSize={pz}&sortColumns={sc}&sortTypes={st}"
+             "&source=WEB&client=WEB").format(rn=rn, pz=pz, sc=sort_cols, st=sort_types)
+        if flt:
+            u += "&filter=" + urllib.parse.quote(flt)
+        j = http_json(u, timeout=10, retries=1) or {}
+        if not j.get("success"):
+            raise RuntimeError("datacenter board: %s" % j.get("message"))
+        result = j.get("result") or {}
+        return result, (result.get("data") or [])
+
+    # ① 精确查当日；② 当日为空/失败时按 TRADE_DATE <= 今日 + 日期倒序取最近一批
+    rows, fallback = [], False
+    if td:
+        try:
+            _, rows = _fetch("(TRADE_DATE='%s')" % td, "NET_INFLOW", "-1")
+        except Exception:
+            rows = []
+    if not rows:
+        _, rows = _fetch(("(TRADE_DATE<='%s')" % td) if td else "",
+                         "TRADE_DATE,NET_INFLOW", "-1,-1")
+        fallback = bool(td)
+
     # 双保险：即便 filter 未生效，也只保留最近交易日那批
     dates = sorted([str(r.get("TRADE_DATE") or "")[:10] for r in rows if r.get("TRADE_DATE")], reverse=True)
     latest = dates[0] if dates else td
@@ -7251,7 +7212,8 @@ def _dc_board_page(t, pz=100):
         })
     if not diff:
         raise RuntimeError("datacenter board empty")
-    return {"total": int(result.get("count") or len(diff)), "diff": diff, "date": latest}
+    # 回退请求的 result.count 是全历史条数，不能用；始终按本页实际条数统计
+    return {"total": len(diff), "diff": diff, "date": latest, "fallback": fallback}
 
 
 def _ld_board_page(t, pz=100):
@@ -7494,12 +7456,18 @@ def leader_analysis(params):
             pass
 
         scanned, inflow, raw, board_err = 0, 0, [], 0
+        board_date, board_fallback = "", False
         for src_name, t in (("行业", 2), ("概念", 3)):
             try:
                 page = _ld_board_page(t)
             except Exception:
                 board_err += 1
                 continue
+            bd = str(page.get("date") or "")[:10]
+            if bd and (not board_date or bd > board_date):
+                board_date = bd
+            if page.get("fallback"):
+                board_fallback = True
             scanned += int(page.get("total") or 0)
             for x in (page.get("diff") or []):
                 nm = str(x.get("f14") or "")
@@ -7583,6 +7551,8 @@ def leader_analysis(params):
         board_src = _LD_SRC.get("board") or "东财资金流"
         mem_src = _LD_SRC.get("members") or "同花顺"
         src_txt = "%s板块 + %s成分股" % (board_src, mem_src)
+        if board_fallback and board_date:
+            src_txt += "（资金榜 %s）" % board_date
         if zsrc:
             src_txt += " + 同花顺涨停池"
         cache_used = ("缓存快照" in board_src) or ("缓存快照" in mem_src)
@@ -7592,15 +7562,19 @@ def leader_analysis(params):
         return {"ok": True, "mode": "leader",
                 "ts": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
                 "date": zdate or last_trade_date(),
+                "board_date": board_date or last_trade_date(), "board_fallback": board_fallback,
                 "source": src_txt, "cache_used": cache_used,
                 "market": market_status(), "scanned": scanned, "inflow": inflow,
                 "covered": covered, "elapsed": round(time.time() - t0, 1),
                 "list": picks, "params": p,
                 "empty": "" if picks else (
-                    "板块数据源暂时都不可用，已沿用最近一次缓存；稍后会自动重试"
-                    if cache_used else (
-                        "板块资金榜接口暂时无响应，稍后会自动重试"
-                        if board_err >= 2 else "当前没有资金净流入且成交额达标的板块，等放量后再试"))}
+                    ("当日板块资金榜尚未生成，已沿用 %s 数据" % board_date
+                     if board_fallback and board_date else
+                     "板块数据源暂时都不可用，已沿用最近一次缓存；稍后会自动重试"
+                     if cache_used else
+                     "板块资金榜接口暂时无响应，稍后会自动重试"
+                     if board_err >= 2 else
+                     "当前没有资金净流入且成交额达标的板块，等放量后再试"))}
 
     key = "leader:%d:%d" % (p["boards"], p["follow"])
     try:
@@ -7696,6 +7670,24 @@ def _fill_industry(rows, limit=60):
     return rows
 
 
+def funnel_industry(params):
+    """v1.8.2：漏斗弹窗按页补行业。新浪快照没有行业字段，展开时才补，
+    每页最多 100 只，复用 _IND_MAP 缓存，不拖慢扫描首屏。"""
+    raw = str((params or {}).get("codes") or "")
+    codes = []
+    for part in raw.split(","):
+        code = part.strip()
+        if len(code) == 6 and (code.startswith("60") or code.startswith("00")) and code not in codes:
+            codes.append(code)
+        if len(codes) >= 100:
+            break
+    if not codes:
+        return {"ok": True, "map": {}}
+    rows = [{"code": c} for c in codes]
+    _fill_industry(rows, limit=100)
+    return {"ok": True, "map": {r["code"]: str(r.get("industry") or "") for r in rows}}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -7781,6 +7773,9 @@ class Handler(BaseHTTPRequestHandler):
                 # v1.7.3：fast=1 用已缓存的日K/分时快速换算（宽松开关切换那一刻秒出）
                 _fast = str(params.pop("fast", "0")) in ("1", "true", "yes")
                 return self._json(scan(params, fast=_fast))
+
+            if path == "/api/scan_funnel_industry":
+                return self._json(funnel_industry({"codes": qs.get("codes", [""])[0]}))
 
             if path == "/api/ai_pick":
                 params = {k: v[0] for k, v in qs.items()}
@@ -8047,8 +8042,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.wfile.write(out)
             if u.path == "/api/save_scan":
                 return self._json(save_scan(body))
-            if u.path == "/api/add_pick":
-                return self._json(add_pick(body))
             if u.path == "/api/scan_delete":
                 return self._json(delete_scans(body.get("files") or []))
             if u.path == "/api/scan_remove_items":

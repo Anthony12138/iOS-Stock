@@ -137,12 +137,52 @@
   .fstep + .fstep::before{
     content:"";position:absolute;left:0;top:4px;bottom:4px;width:1px;background:var(--line);
   }
+  /* v1.8.2：六段外观一致；只有带 rows 的段可点，全市场主板不变灰也不点开 */
+  .fstep[data-stage]{cursor:pointer}
+  .fstep[data-stage]:hover{background:rgba(233,185,73,.05);border-radius:7px}
+  .fstep .caret{position:absolute;right:12px;top:2px;font-size:10px;color:var(--muted2)}
   .fstep .lbl{font-size:10.5px;color:var(--muted2);letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .fstep .val{font-size:21px;font-weight:700;letter-spacing:.5px;color:var(--text)}
   .fstep .val small{font-size:11px;color:var(--muted2);font-weight:400;margin-left:3px}
   .fstep.last .val{color:var(--gold)}
   .fstep .bar{height:3px;border-radius:2px;background:rgba(255,255,255,.07);overflow:hidden;margin-top:2px}
   .fstep .bar i{display:block;height:100%;background:linear-gradient(90deg,rgba(233,185,73,.4),var(--gold));border-radius:2px;transition:width .6s}
+  /* v1.8.2：快速换算 / 完整复核提示条 */
+  .scan-notice{
+    display:none;align-items:flex-start;gap:8px;margin:-6px 0 14px;padding:9px 12px;
+    background:rgba(233,185,73,.07);border:1px solid rgba(233,185,73,.28);border-radius:9px;
+    color:#E8C88A;font-size:11.5px;line-height:1.55;
+  }
+  .scan-notice.on{display:flex}
+  .scan-notice .ic{color:var(--gold);font-weight:700;flex:none}
+  .scan-notice.done{background:rgba(51,181,128,.08);border-color:rgba(51,181,128,.28);color:#BFE8D5}
+  .scan-notice.done .ic{color:#6FD0A8}
+  /* v1.8.2：漏斗分段股票弹窗 */
+  .fm-mask{
+    display:none;position:fixed;inset:0;background:rgba(4,7,12,.74);backdrop-filter:blur(2px);
+    z-index:150;align-items:center;justify-content:center;padding:18px;
+  }
+  .fm-mask.on{display:flex}
+  .fm{width:620px;max-width:100%;max-height:82vh;background:var(--panel);border:1px solid var(--line2);
+    border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden}
+  .fm-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
+  .fm-head .t{font-size:13.5px;font-weight:650;color:#DCE6F5}
+  .fm-head .s{font-size:11px;color:var(--muted2);margin-top:2px}
+  .fm-x{cursor:pointer;color:var(--muted);font-size:19px;line-height:1;border:1px solid var(--line2);background:var(--bg2);
+    width:29px;height:29px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none}
+  .fm-x:hover{color:var(--gold);border-color:var(--gold)}
+  .fm-body{overflow:auto;flex:1}
+  .fm table{width:100%;border-collapse:collapse;font-size:12px}
+  .fm th{color:var(--muted2);font-size:10.5px;font-weight:500;padding:8px 12px;text-align:left;border-bottom:1px solid var(--line)}
+  .fm td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.04);color:#C4D0E2}
+  .fm tbody tr{cursor:pointer}
+  .fm tbody tr:hover{background:rgba(233,185,73,.06)}
+  .fm-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--line);
+    font-size:11px;color:var(--muted2)}
+  .fm-foot button{cursor:pointer;background:var(--bg2);border:1px solid var(--line2);color:#C4D0E2;
+    border-radius:6px;padding:4px 11px;font-size:11px}
+  .fm-foot button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+  .fm-foot button:disabled{opacity:.38;cursor:default}
 
   /* ---------- 主区 ---------- */
   .main{display:grid;grid-template-columns:298px 1fr;gap:16px;align-items:start}
@@ -353,25 +393,6 @@
   .dm-src{margin-top:2px;padding:9px 10px;border:1px solid var(--line);border-radius:7px;
     background:rgba(255,255,255,.02);font-size:9.5px;color:var(--muted2);line-height:1.7}
   .dm-src b{color:#9AA6BA;font-weight:600}
-  /* 详情页底部居中的圆形「＋」：把当前这只票加进复盘结算 */
-  .dadd{
-    position:absolute;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));
-    transform:translateX(-50%);width:46px;height:46px;border-radius:50%;border:none;cursor:pointer;
-    background:linear-gradient(160deg,#F2CB69,#D2A033);color:#1C1503;
-    display:grid;place-items:center;z-index:4;
-    box-shadow:0 8px 24px rgba(233,185,73,.34),0 2px 6px rgba(0,0,0,.4);
-    transition:transform .15s,filter .15s,background .18s;
-  }
-  .dadd:hover{transform:translateX(-50%) scale(1.07);filter:brightness(1.05)}
-  .dadd:active{transform:translateX(-50%) scale(.95)}
-  .dadd:disabled{opacity:.6;cursor:default}
-  .dadd.done{background:linear-gradient(160deg,#5FE0A0,#22A46B);color:#04220F;box-shadow:0 8px 24px rgba(34,197,94,.32)}
-  /* 抽屉底部渐隐，避免长内容贴着圆形按钮显得脏 */
-  .drawer::after{
-    content:"";position:absolute;left:0;right:0;bottom:0;height:84px;pointer-events:none;z-index:3;
-    background:linear-gradient(180deg,rgba(10,15,25,0),#0A0F19 66%);
-  }
-
   .rule-item{padding:10px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;background:#0C121D}
   .rule-item .h{display:flex;align-items:center;gap:8px;margin-bottom:5px}
   .rule-item .ok{
@@ -874,6 +895,8 @@
     padding:10px 14px;font-size:12px;color:#EFA9AB;margin-bottom:14px;display:none;
   }
   .banner.on{display:block}
+  /* v1.8.3：banner 内按板块情况追加的一行（金色，细分隔线） */
+  .banner .b-extra{display:block;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.12);color:var(--gold)}
 
   @media (max-width:1180px){
     .main{grid-template-columns:1fr}
@@ -1306,6 +1329,7 @@
       <div class="fstep"><div class="lbl">④ 流通市值 50~200亿</div><div class="val num" id="f4">—</div><div class="bar"><i></i></div></div>
       <div class="fstep last"><div class="lbl">⑤~⑧ 深度入选</div><div class="val num" id="f5">—</div><div class="bar"><i></i></div></div>
     </div>
+    <div class="scan-notice" id="scanNotice"><span class="ic">◔</span><div id="scanNoticeText"></div></div>
     <div class="main" id="scanMain">
       <!-- 左：条件（v1.7.3 起界面隐藏，DOM 保留供参数读取；标准/宽松由上方开关控制） -->
       <aside class="card" id="scanFilterPanel" style="position:sticky;top:78px;display:none">
@@ -1474,7 +1498,7 @@
       <div class="ai-stat"><div class="k">初筛通过</div><div class="v num" id="aiBase">—</div></div>
       <div class="ai-stat"><div class="k">深度分析</div><div class="v num" id="aiDeep">—</div></div>
       <div class="ai-stat"><div class="k">最终入选</div><div class="v num" id="aiCount">—</div></div>
-      <div class="ai-stat"><div class="k">数据源 / 耗时</div><div class="v num" id="aiMeta" style="font-size:13px">—</div></div>
+      <div class="ai-stat"><div class="k">数据日期 / 耗时</div><div class="v num" id="aiMeta" style="font-size:13px">—</div></div>
       <div class="ai-stat"><div class="k">上次刷新</div><div class="v num" id="aiUpd" style="font-size:13px">—</div></div>
     </div>
 
@@ -1652,7 +1676,7 @@
       <div class="ai-stat"><div class="k">资金净流入</div><div class="v num" id="ldInflow">—</div></div>
       <div class="ai-stat"><div class="k">入选热门</div><div class="v num" id="ldCount">—</div></div>
       <div class="ai-stat"><div class="k">覆盖个股</div><div class="v num" id="ldCover">—</div></div>
-      <div class="ai-stat"><div class="k">数据 / 耗时</div><div class="v num" id="ldMeta" style="font-size:13px">—</div></div>
+      <div class="ai-stat"><div class="k">数据日期 / 耗时</div><div class="v num" id="ldMeta" style="font-size:13px">—</div></div>
       <div class="ai-stat"><div class="k">上次刷新</div><div class="v num" id="ldUpd" style="font-size:13px">—</div></div>
     </div>
 
@@ -1806,11 +1830,6 @@
     <button data-dtab="rules">打分详情</button>
   </div>
   <div class="dbody" id="dBody"></div>
-  <button class="dadd" id="dAdd" title="把这只票加入复盘结算">
-    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" />
-    </svg>
-  </button>
 </aside>
 
 <!-- 选项（二级页面）：筛选 / 自动重扫 / 图表刷新 / 交易日历，各自可折叠；板块内不再各自放控件 -->
@@ -1989,6 +2008,24 @@
   </div>
 </div>
 
+<!-- v1.8.2：漏斗分段股票弹窗（全市场主板不点开） -->
+<div class="fm-mask" id="funnelMask">
+  <div class="fm" role="dialog" aria-modal="true" aria-labelledby="funnelModalTitle">
+    <div class="fm-head">
+      <div><div class="t" id="funnelModalTitle">筛选结果</div><div class="s">点任意一行进入个股详情</div></div>
+      <div class="fm-x" id="funnelModalClose" title="关闭">×</div>
+    </div>
+    <div class="fm-body">
+      <table><thead><tr><th style="width:40%">股票名</th><th>股价</th><th>涨幅</th><th>行业</th></tr></thead>
+      <tbody id="funnelModalBody"></tbody></table>
+    </div>
+    <div class="fm-foot">
+      <span id="funnelModalInfo">共 0 只 · 第 1/1 页</span>
+      <span><button id="funnelModalPrev" type="button">上一页</button> <button id="funnelModalNext" type="button">下一页</button></span>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" aria-live="polite"></div>
 
 <!-- v1.7.5 iOS 专属：下滑后底部中间的回到顶部圆钮（PC 端 display:none 不显示） -->
@@ -2140,6 +2177,7 @@ const SLOW_API = /^\/api\/(scan|ai_pick|swing_pick|limit_up|limit_down)(\?|$)/;
 function apiTimeout(url, given) {
   if (given != null) return given;
   if (SLOW_API.test(url)) return 180000;
+  if (/^\/api\/leader(\?|$)/.test(url)) return 60000;    // 龙头板块：多源轮询 + 成分股，慢网下 25s 易误判
   if (/^\/api\/review(\?|$)/.test(url)) return 120000;   // 逐只拉日K结算
   if (/^\/api\/stock(\?|$)/.test(url)) return 60000;     // 日K + 分时
   return 25000;
@@ -2240,6 +2278,22 @@ function setLoading(on, title, sub, pct) {
     if (overlayN === 0) { refreshEnd(); o.classList.remove('on'); }
   }
   setLoadText(title, sub, pct);
+}
+
+/* v1.8.2：一夜持股开关的常驻提示条（对齐 AI 荐股：快换算先出、复核后台跑） */
+let scanNoticeTimer = null;
+function scanShowNotice(kind, html, hideMs) {
+  const el = $('#scanNotice');
+  if (!el) return;
+  el.className = 'scan-notice on' + (kind === 'done' ? ' done' : '');
+  $('#scanNoticeText').innerHTML = html;
+  clearTimeout(scanNoticeTimer);
+  if (hideMs) scanNoticeTimer = setTimeout(() => { el.classList.remove('on'); }, hideMs);
+}
+function scanHideNotice() {
+  clearTimeout(scanNoticeTimer);
+  const el = $('#scanNotice');
+  if (el) el.classList.remove('on');
 }
 
 /* 顶栏扫描/刷新按钮统一锁：一个板块在跑的时候别让人再点一次。
@@ -2489,7 +2543,9 @@ if (srcMaskEl) srcMaskEl.addEventListener('click', e => { if (e.target === e.cur
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && srcMaskEl && srcMaskEl.classList.contains('on')) closeSrcSheet();
 });
-function setBanner(kind, text) {
+/* v1.8.3：setBanner 增加可选的第三行 note（本板块按情况的补充文案）。
+   主文案与 note 都用 textContent 写入，天然防注入；note 为空时不占位。 */
+function setBanner(kind, text, note) {
   const b = $('#banner');
   if (!b) return;
   // v1.7.6：战法规则页任何提示条都不显示（异常/扫描失败路径也会走到这里）。
@@ -2497,6 +2553,12 @@ function setBanner(kind, text) {
   b.classList.toggle('info', kind === 'info');
   b.classList.add('on');
   b.textContent = text;                 // textContent 天然防注入
+  if (note) {
+    const span = document.createElement('span');
+    span.className = 'b-extra';
+    span.textContent = note;
+    b.appendChild(span);
+  }
 }
 /* r 为板块响应（health 也复用）：source / ts / data_date / stale / degraded_fields / market
    v1.7.6：marketOnly=true 时（health 心跳）只更新 market，保留上次扫描得到的
@@ -2525,6 +2587,49 @@ function syncSource(r, marketOnly) {
   renderSrcPill(lastSrcRender);
   renderMarketBanner();
 }
+/* v1.8.3：banner 内按「当前板块自己的响应」追加一句补充提示，只对该板块生效，互不影响。
+   主提示（休市/降级）仍取全局 lastSrcRender，这里只追加金色第二行。
+   文案按各板块真实会遇到的情况微调；正常有数据返回空串（不追加）。 */
+function bannerExtra() {
+  const v = state.view;
+  if (v === 'strategy') return '';
+  const deg = a => Array.isArray(a) && a.length > 0;
+  if (v === 'scan') {
+    const d = state.data; if (!d) return '';
+    if (d.stale) return '行情源暂不可用，当前沿用上次缓存快照。';
+    if (deg(d.degraded_fields)) return '部分行情字段缺失，已按可用数据筛选。';
+    if (d.fast && d.partial) return '快速换算：命中缓存日K，未联网，稍后自动完整复核。';
+    if (d.fast && d.insufficient) return '本地缓存不足，请先完整扫描一次。';
+  } else if (v === 'ai') {
+    const d = state.ai; if (!d) return '';
+    if (d.stale) return '行情源暂不可用，当前沿用上次缓存快照。';
+    if (d.fast && d.insufficient) return '本地缓存不足，请先完整选股一次。';
+    if (d.fast && d.partial) return '快速换算：命中缓存日K，未联网，稍后自动完整复核。';
+    if (deg(d.degraded_fields)) return '部分行情字段缺失，评分按可用数据计算。';
+    if (state.annInfo && state.annInfo.error) return '公告暂不可用，消息面沿用上次缓存。';
+  } else if (v === 'zt') {
+    const d = state.ztd; if (!d) return '';
+    if (d.stale) return '涨停池数据源暂不可用，榜单可能非最新。';
+    if (deg(d.degraded_fields)) return '涨停池数据异常，封单质量评分可能不准。';
+    if (d.emotion && d.emotion.zb_known === false) return '炸板率数据源未知，该项按未知处理。';
+    if ((d.errors || 0) > 0) return '部分个股因日K不足未完成评分。';
+  } else if (v === 'dt') {
+    const d = state.dtd; if (!d) return '';
+    if (d.stale) return '跌停池数据源暂不可用，榜单可能非最新。';
+    if (deg(d.degraded_fields)) return '跌停池数据异常，评分可能不准。';
+    if ((d.errors || 0) > 0) return '部分个股因日K不足未完成评分。';
+  } else if (v === 'ld') {
+    const d = state.ldd; if (!d) return '';
+    if (d.board_fallback) return '当日数据未生成，已沿用 ' + String(d.board_date || '').slice(0, 10) + ' 资金榜。';
+    if (d.cache_used) return '数据源限流，当前沿用缓存快照。';
+    if (!(d.list || []).length) return '当前没有资金净流入且成交额达标的板块。';
+  } else if (v === 'review') {
+    const d = state.searchResult; if (!d) return '';
+    if (d.stale) return '行情源暂不可用，当前沿用上次缓存快照。';
+    if (deg(d.degraded_fields)) return '部分行情字段缺失，评分按可用数据计算。';
+  }
+  return '';
+}
 /* v1.7.6：休市 / 降级 banner 独立渲染，切板块时也调用——战法规则页不显示任何提示条。
    休市文案按当日情况细分：周末/节假日(day_off) 展示上一交易日数据；
    工作日收盘仍为当日收盘数据；午间休市保留原提示；盘前保留原提示。降级提示不变。 */
@@ -2550,7 +2655,9 @@ function renderMarketBanner() {
   }
   if (r.stale) notes.push('双源不可用，展示缓存快照');
   else if (r.degraded) notes.push('部分字段缺失，数据降级');
-  if (notes.length) setBanner('info', notes.join(' · '));
+  // v1.8.3：本板块按情况的补充文案（金色第二行），只对该板块生效
+  const extra = bannerExtra();
+  if (notes.length || extra) setBanner('info', notes.join(' · '), extra);
   else if (m.state === 'open' || state.view === 'strategy') {
     // v1.7.6：只撤掉 info 提示，保留 error（扫描失败）横幅，别静默吞掉失败信号
     const b = $('#banner');
@@ -2934,6 +3041,7 @@ function planRow(p, withDays) {
 function renderAll() {
   const d = state.data;
   if (!d) return;
+  closeFunnelModal();          // 新数据到了就收起旧分段弹窗，避免看到过期列表
   renderFunnel(d);
   const sm = (d.params && d.params.score_min) != null ? d.params.score_min : 60;
   $('#paramHint').textContent = `${d.params ? d.params.gain_min + '~' + d.params.gain_max + '%' : ''} · ${d.elapsed}s`;
@@ -2944,13 +3052,99 @@ function renderAll() {
 function renderFunnel(d) {
   const f = d.funnel || [];
   const total = (f[0] && f[0].count) || 1;
-  $('#funnel').innerHTML = f.map((s, i) => `
-    <div class="fstep ${i === f.length - 1 ? 'last' : ''}">
+  // v1.8.2：六段外观一致；只有带 rows 的段可点（全市场主板不带 rows，不变灰也不点开）
+  $('#funnel').innerHTML = f.map((s, i) => {
+    const clickable = Array.isArray(s.rows);
+    return `
+    <div class="fstep ${i === f.length - 1 ? 'last' : ''}" ${clickable ? `data-stage="${i}"` : ''}>
+      ${clickable ? '<span class="caret">▾</span>' : ''}
       <div class="lbl" title="${esc(s.note)}">${esc(s.name)}</div>
       <div class="val num">${esc(s.count)}${i > 0 ? '<small>只</small>' : ''}</div>
       <div class="bar"><i style="width:${Math.max(2, (s.count || 0) / total * 100)}%"></i></div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  $$('#funnel .fstep[data-stage]').forEach(el => {
+    el.onclick = () => openFunnelModal(+el.dataset.stage);
+  });
 }
+
+/* v1.8.2：漏斗分段股票弹窗。点哪段取哪段，按页补行业，点行进详情。 */
+let fmStage = -1, fmPage = 1, fmReqToken = 0;
+const FM_PER_PAGE = 100;
+
+function openFunnelModal(i) {
+  const s = (state.data && state.data.funnel || [])[i];
+  if (!s || !Array.isArray(s.rows)) return;
+  fmStage = i; fmPage = 1;
+  $('#funnelModalTitle').textContent = s.name;
+  $('#funnelMask').classList.add('on');
+  renderFunnelRows();
+}
+
+function closeFunnelModal() {
+  fmStage = -1;
+  fmReqToken++;
+  $('#funnelMask').classList.remove('on');
+}
+
+function renderFunnelRows() {
+  if (fmStage < 0 || !state.data) return;
+  const s = (state.data.funnel || [])[fmStage];
+  if (!s) return;
+  const rows = s.rows || [];
+  const pages = Math.max(1, Math.ceil(rows.length / FM_PER_PAGE));
+  fmPage = Math.min(fmPage, pages);
+  const slice = rows.slice((fmPage - 1) * FM_PER_PAGE, fmPage * FM_PER_PAGE);
+  const body = $('#funnelModalBody');
+  body.innerHTML = slice.length ? slice.map(r => `
+    <tr data-code="${esc(r.code)}" data-market="${esc(r.market)}">
+      <td>${esc(r.name)}</td>
+      <td class="num">${numOrDash(r.price, 2)}</td>
+      <td class="num ${fmt.cls(r.pct)}">${fmt.pct(r.pct)}</td>
+      <td class="fm-ind" title="${esc(r.industry || '')}">${r.industry ? esc(indShort(r.industry)) : '—'}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;color:var(--muted2)">该段暂无股票</td></tr>';
+  $('#funnelModalInfo').textContent = `共 ${rows.length} 只 · 第 ${fmPage}/${pages} 页`;
+  $('#funnelModalPrev').disabled = fmPage <= 1;
+  $('#funnelModalNext').disabled = fmPage >= pages;
+  body.querySelectorAll('tr[data-code]').forEach(tr => {
+    tr.onclick = () => { closeFunnelModal(); openDetail(tr.dataset.code, +tr.dataset.market); };
+  });
+
+  // 新浪快照没有行业：只补当前页缺失的票，按页缓存，不拖慢扫描首屏
+  const need = slice.filter(r => r.code && !r.industry).map(r => r.code);
+  if (!need.length) return;
+  const token = ++fmReqToken;
+  api('/api/scan_funnel_industry?codes=' + encodeURIComponent(need.join(',')))
+    .then(res => {
+      if (token !== fmReqToken || fmStage < 0 || !res || !res.ok) return;
+      const map = res.map || {};
+      let changed = false;
+      need.forEach(code => {
+        const ind = map[code] || '';
+        if (!ind) return;
+        rows.forEach(r => { if (r.code === code && !r.industry) { r.industry = ind; changed = true; } });
+      });
+      if (!changed) return;
+      $$('#funnelModalBody tr[data-code]').forEach(tr => {
+        const ind = map[tr.dataset.code];
+        if (!ind) return;
+        const td = tr.querySelector('.fm-ind');
+        if (td) { td.textContent = indShort(ind); td.title = ind; }
+      });
+    })
+    .catch(() => {});
+}
+
+$('#funnelModalClose').onclick = closeFunnelModal;
+$('#funnelMask').onclick = e => { if (e.target === $('#funnelMask')) closeFunnelModal(); };
+$('#funnelModalPrev').onclick = () => { if (fmPage > 1) { fmPage--; renderFunnelRows(); } };
+$('#funnelModalNext').onclick = () => { if (fmStage >= 0) { fmPage++; renderFunnelRows(); } };
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('#funnelMask').classList.contains('on')) {
+    closeFunnelModal();
+  }
+});
 
 function filtered() {
   const d = state.data; if (!d) return [];
@@ -4020,7 +4214,6 @@ async function openDetail(code, market, extraItem) {
   state.scrollBeforeDetail = document.body.scrollTop || document.documentElement.scrollTop || 0;
   document.documentElement.classList.add('drawer-open');
   document.body.classList.add('drawer-open');
-  resetAddBtn();
   $('#tbody').querySelectorAll('tr').forEach(tr => tr.classList.toggle('sel', tr.dataset.code === code));
   $('#mask').classList.add('on'); $('#drawer').classList.add('on');
   $('#dName').textContent = item.name || '';
@@ -4635,52 +4828,6 @@ function closeDetail() {
 }
 /* Escape 统一在后面处理：只关最上层（选项层 > 抽屉） */
 
-/* 详情页底部「＋」：把当前这只票加进复盘结算（同一天同一只只更新，不会重复） */
-const ADD_PLUS = '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" /></svg>';
-const ADD_OK = '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true"><path d="M4.6 12.6l4.4 4.4L19.4 6.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>';
-function resetAddBtn() {
-  const b = $('#dAdd');
-  if (!b) return;
-  b.classList.remove('done'); b.disabled = false; b.innerHTML = ADD_PLUS;
-}
-async function addCurrentToReview() {
-  const it = state.curItem;
-  const btn = $('#dAdd');
-  if (!it || !btn || btn.disabled) return;
-  btn.disabled = true;
-  try {
-    // 用 liveTick 同步过的最新价，再从详情 K 线收盘价兜底，不用打开时的旧价
-    const kb = (state.detail && state.detail.kline) || [];
-    const close = kb.length ? kb[kb.length - 1].close : null;
-    const price = (close > 0 ? close : it.price);
-    const scoreMin = readParams().score_min;
-    const r = await api('/api/add_pick', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        code: it.code, name: it.name,
-        market: it.market ?? (String(it.code).startsWith('6') ? 1 : 0),
-        price, score: it.score, grade: it.grade,
-        pct: it.pct, tags: it.tags || [], mode: it.mode || (state.view === 'ai' ? 'ai' : 'scan'),
-        // 一字板 / 封死跌停的挂单价买不到，复盘要按当日收盘价估算，不能按挂单价算收益
-        buy_ok: it.buy_ok !== false,
-        score_min: scoreMin
-      })
-    });
-    if (!r.ok) throw new Error(r.error || '接口异常');
-    btn.classList.add('done');
-    btn.innerHTML = ADD_OK;
-    toast(r.dup ? `${it.name} 已在今天的复盘清单里，已更新价格与评分`
-      : `已加入复盘结算：${it.name} · 今日清单共 ${r.count} 只`);
-    if (state.view === 'review') loadScans();
-    setTimeout(() => { resetAddBtn(); }, 1500);
-  } catch (e) {
-    toast('加入复盘失败：' + (e.message || '接口异常'));
-    btn.disabled = false;
-  }
-}
-$('#dAdd').onclick = addCurrentToReview;
-
 /* ------------------ 排序 / 过滤 ------------------ */
 /* 只给可排序表头绑定点击；HTML 已加 tabindex=0，这里补键盘 Enter / Space */
 $$('thead th[data-sort]').forEach(th => {
@@ -4733,36 +4880,98 @@ function applyPreset(kind) {
   saveSettings(true);
   toast(kind === 'std' ? '已切换到标准模式（视频原参数）' : '已切换到宽松模式，候选会明显变多');
 }
-/* v1.7.3：标准/宽松合并为「宽松模式」开关——关＝std，开＝loose，默认关。
-   切换后自动重扫，机制对齐 AI 荐股：先用缓存快速换算秒出榜单（带「缓存换算」角标），
-   随后自动跑一次完整口径复核替换；缓存不足则直接完整扫描。token 防止快速连拨时旧结果覆盖新结果。 */
+/* v1.8.2：标准/宽松开关完全对齐 AI 荐股——清空旧候选 → 浮层（busy 时保持并重试）
+   → 缓存换算秒出 + 常驻提示条 → 后台静默完整复核 → 提示条变绿收起。
+   token 作废旧链，且只有当前链能关浮层，杜绝快速连拨时旧链关掉新浮层。 */
 let presetScanToken = 0;
-let presetScanChain = Promise.resolve();       // 串行队列：一组「fast→full」跑完再跑下一组，避免并发抢占 scanning 锁
+let presetScanChain = Promise.resolve();
+
+async function presetFullScan(token, fastList) {
+  for (let i = 0; i < 4 && token === presetScanToken; i++) {
+    let full;
+    try { full = await scan(true); } catch (e) { full = false; }
+    if (token !== presetScanToken) return;
+    if (full !== 'busy') {
+      if (full === true && state.data && !state.data.fast) {
+        const sm = (state.data.params && state.data.params.score_min) != null
+          ? state.data.params.score_min : 60;
+        const n = (state.data.list || []).filter(x => gateScore(x) >= sm && inPF(x)).length;
+        const prev = new Set((fastList || []).map(x => String(x.code)));
+        scanShowNotice('done', `已按完整口径复核 · <b>${n}</b> 只入选`
+          + (prev.size ? `（快速版 ${prev.size} 只）` : '') + ` · ${state.data.elapsed}s`, 3000);
+      } else {
+        scanShowNotice('work', '完整复核未完成，当前为缓存换算结果，可稍后点「开始扫描」重扫', 5000);
+      }
+      return;
+    }
+    await new Promise(r => setTimeout(r, 1200));
+  }
+  if (token === presetScanToken) {
+    scanShowNotice('work', '完整复核暂未抢到扫描锁，当前为缓存换算结果', 5000);
+  }
+}
+
 function scanPresetSwitch() {
   const token = ++presetScanToken;
-  // v1.8.1：切换时显示刷新等待浮层（fast 阶段通常 1 秒内秒出），完整复核静默
+  scanHideNotice();
+  // 像 AI 荐股一样先清空旧口径结果，避免「浮层关了，旧榜单还在」
+  state.data = null;
+  state.scanFast = null;
+  state.scanError = null;
+  $('#tbody').innerHTML = '';
+  $('#funnel').innerHTML = '';
+  renderScanCards([]);
+  const empty = $('#empty');
+  if (empty) {
+    empty.style.display = 'block';
+    empty.querySelector('.big').textContent = '正在换算…';
+    empty.querySelector('.sub').innerHTML = '按对应评分标准重新筛选候选股票（宽松/标准），缓存命中时约 1–3 秒。';
+  }
+  const minShow = new Promise(r => setTimeout(r, 300));   // 保证浮层至少可见一帧
+  let loadingClosed = false;
+  const closeLoading = () => {
+    if (token !== presetScanToken || loadingClosed) return;  // 旧链无权关新浮层
+    loadingClosed = true;
+    setLoading(false);
+  };
+  // 同步置位，先于任何 await，保证每次拨动都能看见浮层
   setLoading(true, '正在用缓存刷新评分', '按对应评分标准重新筛选候选股票（宽松/标准）', 70);
-  let loadingOpen = true;
-  const closeLoading = () => { if (loadingOpen) { loadingOpen = false; setLoading(false); } };
+
   presetScanChain = presetScanChain.catch(() => {}).then(async () => {
-    if (token !== presetScanToken) { closeLoading(); return; }  // 排在后面时已被更新的拨动作废，整组跳过
-    // ① 先试缓存快速换算（不联网）
-    let fastResult;
-    try { fastResult = await scan(true, true); } catch (e) { fastResult = null; }
-    if (token !== presetScanToken) { closeLoading(); return; }
-    // 'busy'=别的扫描正占用锁、'insufficient'=缓存不足：都不算 fast 已应用，直接走完整扫描
-    const fastApplied = fastResult && fastResult !== 'insufficient' && fastResult !== 'busy';
-    if (fastApplied) {
-      await new Promise(r => setTimeout(r, 350));   // 让「缓存换算」榜单短暂可见
-      if (token !== presetScanToken) { closeLoading(); return; }
-    }
-    closeLoading();   // fast 阶段收起浮层，后面完整复核静默
-    // ② 完整口径复核（静默，替换 fast 子集）。若仍被自动重扫占锁，短暂重试几次。
-    for (let i = 0; i < 4 && token === presetScanToken; i++) {
-      let full;
-      try { full = await scan(true); } catch (e) { break; }
-      if (full !== 'busy') break;                // 真正跑了一次完整扫描
-      await new Promise(r => setTimeout(r, 1500));
+    if (token !== presetScanToken) return;
+    try {
+      let fastResult = null;
+      for (let i = 0; i < 6; i++) {
+        try { fastResult = await scan(true, true); } catch (e) { fastResult = null; }
+        if (token !== presetScanToken) return;
+        if (fastResult === 'busy') {
+          setLoadText('正在等待扫描空闲', '自动重扫占用中，稍后继续换算…', 76);
+          await new Promise(r => setTimeout(r, 600));
+          continue;
+        }
+        break;
+      }
+      await minShow;
+      if (token !== presetScanToken) return;
+      const fastResp = state.scanFast;
+      const fastApplied = fastResult && fastResult !== 'insufficient' && fastResult !== 'busy' && fastResp;
+      closeLoading();
+      if (fastApplied) {
+        const hitTxt = (fastResp.cache_hit != null && fastResp.cache_pool != null)
+          ? `命中缓存 <b>${fastResp.cache_hit}/${fastResp.cache_pool}</b> 只 · ` : '';
+        scanShowNotice('work', `快速换算完成 · ${hitTxt}正在按完整口径复核…`);
+        await presetFullScan(token, fastResp.list || []);
+      } else {
+        scanShowNotice('work', '缓存不足，正在按完整口径扫描…约 20–40 秒');
+        await presetFullScan(token, []);
+      }
+    } catch (e) {
+      if (token !== presetScanToken) return;
+      closeLoading();
+      scanShowNotice('work', '缓存换算失败，正在改走完整扫描…');
+      await presetFullScan(token, []);
+    } finally {
+      closeLoading();
     }
   });
   return presetScanChain;
@@ -5369,9 +5578,16 @@ function setMeta(k, left, right) {
   el.dataset.y = '0';
   paintTwo(el);
 }
+/* v1.8.3：各板块统计格统一显示「数据源真实日期」——
+   AI/涨停/跌停取 data_date（后端 _json 已按 date/ts 兜底注入，随快照走）；
+   龙头取 board_date（板块资金榜真实日期，回退时也是它），不写涨停池 date；
+   都拿不到才退回 d.date。日期完整 YYYY-MM-DD，手机端拆两行照旧。 */
+const metaDataDate = (k, d) => {
+  if (k === 'ld') return d.board_date || d.data_date || d.date || '—';
+  return d.data_date || d.date || '—';
+};
 const normMetaParts = (k, d) => {
-  let left = (k === 'zt' || k === 'dt' || k === 'ld')
-    ? (d.date || d.source || '—') : (d.source || '—');
+  let left = metaDataDate(k, d);
   // v1.7.3：龙头分析走到缓存兜底时，在日期后标注「缓存」，如实告知数据非最新
   if (k === 'ld' && d.cache_used) left += ' ·缓存';
   return [left, d.elapsed != null ? d.elapsed + 's' : '—'];
@@ -5987,6 +6203,7 @@ async function runStockSearch() {
     if (!r || r.ok === false) throw new Error((r && r.error) || '接口异常');
     state.searchResult = r;
     renderSearch();
+    if (typeof renderMarketBanner === 'function') renderMarketBanner();  // v1.8.3：搜索降级时也刷 banner 补充提示（搜索不调 syncSource）
     $('#searchHint').textContent = r.note || ('检索「' + q + '」完成');
   } catch (e) {
     $('#searchHint').textContent = '搜索失败：' + (e.message || '接口异常');
@@ -6063,7 +6280,7 @@ function applyAIResult(r) {
   $('#aiBase').textContent = r.base;
   $('#aiDeep').textContent = r.deep;
   $('#aiCount').textContent = (r.list || []).filter(inPF).length;
-  setMeta('ai', r.source || '—', r.elapsed + 's');
+  const aiMeta = normMetaParts('ai', r); setMeta('ai', aiMeta[0], aiMeta[1]);
   renderAI();
   markUpd('ai', r);
 }
@@ -6221,7 +6438,7 @@ async function runAI(silent, extSignal, force) {
     $('#aiDeep').textContent = r.deep;
     const n = (r.list || []).filter(inPF).length;   // 与表格/标题一致：叠加股价筛选
     $('#aiCount').textContent = n;
-    setMeta('ai', r.source || '—', r.elapsed + 's');
+    const aiMeta = normMetaParts('ai', r); setMeta('ai', aiMeta[0], aiMeta[1]);
     renderAI();
     markUpd('ai', r);
     if (prog) prog.done();
@@ -6442,7 +6659,7 @@ async function runZT(silent, extSignal, force) {
     $('#ztMain').textContent = r.main;
     $('#ztOver').textContent = bk.overnight;
     $('#ztIntra').textContent = bk.intraday;
-    setMeta('zt', r.date || '—', r.elapsed + 's');
+    const ztMeta = normMetaParts('zt', r); setMeta('zt', ztMeta[0], ztMeta[1]);
     dimFoldAll(); renderZT();
     markUpd('zt', r);
     if (prog) prog.done();
@@ -6620,7 +6837,7 @@ async function runDT(silent, extSignal, force) {
     $('#dtDi').textContent = bk.ditian;
     $('#dtReIn').textContent = bk.intraday;
     $('#dtReCl').textContent = bk.close;
-    setMeta('dt', r.date || '—', r.elapsed + 's');
+    const dtMeta = normMetaParts('dt', r); setMeta('dt', dtMeta[0], dtMeta[1]);
     dimFoldAll(); renderDT();
     markUpd('dt', r);
     if (prog) prog.done();
@@ -6778,7 +6995,7 @@ async function runLD(silent, extSignal, force) {
     $('#ldInflow').textContent = numOrDash(r.inflow, 0);
     $('#ldCount').textContent = (r.list || []).length;
     $('#ldCover').textContent = numOrDash(r.covered, 0);
-    setMeta('ld', r.date || '—', r.elapsed + 's');
+    const ldMeta = normMetaParts('ld', r); setMeta('ld', ldMeta[0], ldMeta[1]);
     renderLD();
     markUpd('ld', r);
     if (prog) prog.done();
